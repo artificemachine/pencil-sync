@@ -148,7 +148,10 @@ describe("SyncEngine", () => {
     });
 
     it("blocks sync when budget exhausted", async () => {
-      config.settings.maxBudgetUsd = 0.0001;
+      // Budget large enough for the first sync's pre-flight estimate to pass,
+      // but exhausted by its actual spend ($1.05 from the mock below) so the
+      // second sync is blocked by cumulative exhaustion (not the pre-flight gate).
+      config.settings.maxBudgetUsd = 0.5;
       const lowBudgetEngine = new SyncEngine(config);
       await lowBudgetEngine.initialize();
 
@@ -367,6 +370,26 @@ describe("SyncEngine", () => {
       expect(result.error).toBeUndefined();
       // First sync uses Claude, second fill-only sync should not.
       expect(mockedRunClaude).toHaveBeenCalledTimes(1);
+    });
+
+    it("blocks when projected output cost pushes the estimate over budget", async () => {
+      // Prompt is tiny (mocked), so input-only cost would clear this budget;
+      // only the projected output cost can push it over. This guards against a
+      // generation slipping past a check that weighed the prompt alone.
+      config.settings.maxBudgetUsd = 0.0001;
+      const engine2 = new SyncEngine(config);
+      await engine2.initialize();
+
+      // Trigger a code-to-pen sync (code changed, pen unchanged → no conflict).
+      await writeFile(join(dir, "code", "app.tsx"), "modified");
+
+      const result = await engine2.syncMapping(mapping, "code-changed");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("projected output");
+      expect(mockedRunClaude).not.toHaveBeenCalled();
+
+      engine2.shutdown();
     });
   });
 

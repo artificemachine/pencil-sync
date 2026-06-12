@@ -193,6 +193,45 @@ describe("runClaude", () => {
     expect(result.stderr).toBe("API error");
   });
 
+  it("estimates token usage from prompt and stdout when the CLI output is unparseable", async () => {
+    const promise = runClaude({ prompt: "a".repeat(400), model: "claude-sonnet-4-6" });
+
+    listeners.get("stdout:data")!(Buffer.from("b".repeat(200)));
+    listeners.get("stderr:data")!(Buffer.from("no token stats in this format"));
+    listeners.get("close")!(0);
+
+    const result = await promise;
+    expect(result.success).toBe(true);
+    // 400 chars / 4 = 100 input, 200 chars / 4 = 50 output
+    expect(result.tokenUsage).toEqual({ input: 100, output: 50 });
+    expect(result.tokenUsageEstimated).toBe(true);
+  });
+
+  it("does not fabricate token usage on a failed run", async () => {
+    const promise = runClaude({ prompt: "a".repeat(400), model: "claude-sonnet-4-6" });
+
+    listeners.get("stdout:data")!(Buffer.from("partial"));
+    listeners.get("stderr:data")!(Buffer.from("crashed, no token stats"));
+    listeners.get("close")!(1);
+
+    const result = await promise;
+    expect(result.success).toBe(false);
+    expect(result.tokenUsage).toBeUndefined();
+    expect(result.tokenUsageEstimated).toBe(false);
+  });
+
+  it("prefers parsed token usage over the estimate when available", async () => {
+    const promise = runClaude({ prompt: "a".repeat(4000), model: "claude-sonnet-4-6" });
+
+    listeners.get("stdout:data")!(Buffer.from("output"));
+    listeners.get("stderr:data")!(Buffer.from('{"input_tokens": 12, "output_tokens": 7}'));
+    listeners.get("close")!(0);
+
+    const result = await promise;
+    expect(result.tokenUsage).toEqual({ input: 12, output: 7 });
+    expect(result.tokenUsageEstimated).toBe(false);
+  });
+
   it("handles spawn error (binary not found)", async () => {
     const promise = runClaude({ prompt: "test", model: "claude-sonnet-4-6" });
 

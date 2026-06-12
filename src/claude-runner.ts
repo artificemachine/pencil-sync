@@ -26,9 +26,14 @@ export function estimateCost(model: string, tokenUsage: TokenUsage): number {
          (tokenUsage.output / 1_000_000) * pricing.output;
 }
 
+// Rough heuristic: ~4 chars per token. Used both for pre-flight estimates
+// and as a fallback when the CLI's token-usage output can't be parsed.
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
 export function estimateInputTokens(prompt: string): number {
-  // Rough heuristic: ~4 chars per token
-  return Math.ceil(prompt.length / 4);
+  return estimateTokens(prompt);
 }
 
 export function parseTokenUsage(stderr: string): TokenUsage | undefined {
@@ -145,9 +150,24 @@ async function runOnce(options: ClaudeRunOptions): Promise<ClaudeRunResult> {
         if (finalStderr) log.debug(`stderr: ${finalStderr.slice(0, 500)}`);
       }
 
-      const tokenUsage = parseTokenUsage(finalStderr);
+      let tokenUsage = parseTokenUsage(finalStderr);
+      let tokenUsageEstimated = false;
+
+      // Budget safety: if the CLI output couldn't be parsed for token usage on a
+      // successful run, fall back to a length-based estimate instead of recording
+      // nothing. Recording nothing would let cumulative spend stay at 0 and
+      // silently disable budget enforcement. Surface it so the degradation is visible.
+      if (!tokenUsage && !timeoutError && exitCode === 0) {
+        tokenUsage = { input: estimateTokens(prompt), output: estimateTokens(stdout) };
+        tokenUsageEstimated = true;
+        log.warn(
+          `Could not parse token usage from Claude CLI output; using length-based estimate ` +
+          `(~${tokenUsage.input} in / ${tokenUsage.output} out) for budget tracking. Budget accuracy is reduced.`,
+        );
+      }
+
       const mcpError = detectMcpError(finalStderr);
-      resolve({ success: exitCode === 0, stdout, stderr: finalStderr, exitCode, tokenUsage, mcpError });
+      resolve({ success: exitCode === 0, stdout, stderr: finalStderr, exitCode, tokenUsage, mcpError, tokenUsageEstimated });
     };
 
     proc.stdout.on("data", (chunk: Buffer) => {
