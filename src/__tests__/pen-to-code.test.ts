@@ -185,7 +185,8 @@ describe("syncPenToCode", () => {
 
       const result = await syncPenToCode(mappingNoCss, settings, previousState);
 
-      expect(result.success).toBe(true);
+      // No CSS file to match against — zero-match is now a failure
+      expect(result.success).toBe(false);
       expect(result.filesChanged).toEqual([]);
     });
 
@@ -500,13 +501,13 @@ describe("syncPenToCode", () => {
   });
 
   describe("fill change error handling", () => {
-    it("succeeds gracefully when old RGB is not found in CSS", async () => {
+    it("fails when fill diffs match zero CSS declarations and there is no other work", async () => {
       await writeFile(
         join(dir, "design.pen"),
         makePenJson([{ id: "btn1", name: "submitBtn", type: "frame", fill: "#ff0000" }]),
       );
 
-      // CSS does NOT contain the old RGB value
+      // CSS does NOT contain the old RGB value — zero-match scenario
       await mkdir(join(dir, "code", "app"), { recursive: true });
       await writeFile(
         join(dir, "code", "app", "globals.css"),
@@ -520,12 +521,66 @@ describe("syncPenToCode", () => {
         makeSnapshot("btn1", { name: "submitBtn", type: "frame", fill: "#00ff00" }),
       );
 
-      // Should succeed (non-blocking) even though the old RGB is not in the CSS
+      const result = await syncPenToCode(mapping, settings, previousState);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeTruthy();
+      expect(result.filesChanged).toEqual([]);
+    });
+
+    it("succeeds with warnings when some fills match and some do not", async () => {
+      await writeFile(
+        join(dir, "design.pen"),
+        makePenJson([
+          { id: "btn1", name: "submitBtn", type: "frame", fill: "#ff0000" },
+          { id: "bg1", name: "pageBg", type: "frame", fill: "#0000ff" },
+        ]),
+      );
+
+      // CSS contains old RGB for submitBtn but NOT for pageBg
+      await mkdir(join(dir, "code", "app"), { recursive: true });
+      await writeFile(
+        join(dir, "code", "app", "globals.css"),
+        `:root {
+  --color-accent-submit: 0 255 0;
+}
+`,
+      );
+
+      const previousState = makePreviousState({
+        ...makeSnapshot("btn1", { name: "submitBtn", type: "frame", fill: "#00ff00" }),
+        ...makeSnapshot("bg1", { name: "pageBg", type: "frame", fill: "#ffffff" }),
+      });
+
       const result = await syncPenToCode(mapping, settings, previousState);
 
       expect(result.success).toBe(true);
-      // No files changed since old RGB wasn't found
-      expect(result.filesChanged).toEqual([]);
+      expect(result.warnings).toBeDefined();
+      expect(result.warnings!.length).toBeGreaterThan(0);
+      expect(result.filesChanged.length).toBeGreaterThan(0);
+    });
+
+    it("still succeeds cleanly when all fills match", async () => {
+      await writeFile(
+        join(dir, "design.pen"),
+        makePenJson([{ id: "btn1", name: "submitBtn", type: "frame", fill: "#ff0000" }]),
+      );
+
+      await mkdir(join(dir, "code", "app"), { recursive: true });
+      await writeFile(
+        join(dir, "code", "app", "globals.css"),
+        makeCssWithThemes("accent-submit", "0 128 0"),
+      );
+
+      const previousState = makePreviousState(
+        makeSnapshot("btn1", { name: "submitBtn", type: "frame", fill: "#008000" }),
+      );
+
+      const result = await syncPenToCode(mapping, settings, previousState);
+
+      expect(result.success).toBe(true);
+      expect(result.warnings).toBeUndefined();
+      expect(result.filesChanged.length).toBeGreaterThan(0);
     });
   });
 });

@@ -131,17 +131,13 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Apply fill changes directly and return changed file list. Non-blocking errors are logged. */
+/** Apply fill changes directly and return the full FillChangeResult. */
 async function executeFillFastPath(
   mapping: MappingConfig,
   fillDiffs: PenDiffEntry[],
-): Promise<string[]> {
+): Promise<FillChangeResult> {
   log.info(`Applying ${fillDiffs.length} color change(s) directly (no Claude CLI needed)`);
-  const fillResult = await applyFillChanges(mapping, fillDiffs);
-  for (const err of fillResult.errors) {
-    log.warn(`Fill change issue: ${err}`);
-  }
-  return fillResult.filesChanged;
+  return applyFillChanges(mapping, fillDiffs);
 }
 
 /** Delegate non-fill changes to Claude CLI. Returns changed files or a partial-failure result. */
@@ -274,21 +270,44 @@ export async function syncPenToCode(
     };
   }
 
-  const fillFilesChanged = fillDiffs.length > 0
-    ? await executeFillFastPath(mapping, fillDiffs)
-    : [];
+  let fillFilesChanged: string[] = [];
+  let fillWarnings: string[] = [];
+
+  if (fillDiffs.length > 0) {
+    const fillResult = await executeFillFastPath(mapping, fillDiffs);
+    fillFilesChanged = fillResult.filesChanged;
+    fillWarnings = fillResult.errors;
+
+    for (const w of fillWarnings) {
+      log.warn(`Fill change issue: ${w}`);
+    }
+
+    // Zero-match with no other work = failure
+    if (fillFilesChanged.length === 0 && otherDiffs.length === 0) {
+      return {
+        success: false,
+        direction: "pen-to-code",
+        mappingId: mapping.id,
+        filesChanged: [],
+        error: `Color fast-path matched zero CSS declarations. Unmatched fill change(s): ${fillWarnings.join("; ") || "no CSS variable found for the changed fill"}`,
+        penSnapshot: snapshot,
+      };
+    }
+  }
 
   if (otherDiffs.length > 0) {
     return executeClaudeSync(mapping, settings, otherDiffs, fillFilesChanged, snapshot);
   }
 
-  log.success(`Pen-to-code sync complete (fast path): ${fillFilesChanged.length} file(s) updated`);
+  const uniqueFiles = [...new Set(fillFilesChanged)];
+  log.success(`Pen-to-code sync complete (fast path): ${uniqueFiles.length} file(s) updated`);
 
   return {
     success: true,
     direction: "pen-to-code",
     mappingId: mapping.id,
-    filesChanged: [...new Set(fillFilesChanged)],
+    filesChanged: uniqueFiles,
+    ...(fillWarnings.length > 0 ? { warnings: fillWarnings } : {}),
     penSnapshot: snapshot,
   };
 }

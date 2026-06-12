@@ -69,3 +69,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Share one ignored-directory list (`IGNORED_DIRS` / `IGNORED_GLOBS`) between watcher and state-hasher; adds `.next` to the skip set, closing the drift where build output was hashed but not watched (P2-E)
 - Replace POSIX-only `validatePathWithinDirectory` in config.ts with the cross-platform `validatePathWithin` from utils.ts; removes the duplicate function and fixes path-traversal guard on Windows (P2-D)
 - 322 tests passing (6 new tests added across ignored-dirs and config suites)
+- 2026-06-12: fix(pen-to-code): report color fast-path no-ops instead of silent success (P2-C)

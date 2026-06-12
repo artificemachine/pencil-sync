@@ -366,8 +366,8 @@ describe("SyncEngine", () => {
         .mockReturnValueOnce(fillOnlyDiff);
 
       const result = await engine.syncMapping(mapping, "pen-changed");
-      expect(result.success).toBe(true);
-      expect(result.error).toBeUndefined();
+      // No CSS file configured — zero-match returns failure, but Claude should not be called.
+      expect(result.success).toBe(false);
       // First sync uses Claude, second fill-only sync should not.
       expect(mockedRunClaude).toHaveBeenCalledTimes(1);
     });
