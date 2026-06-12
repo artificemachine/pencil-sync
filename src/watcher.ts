@@ -1,10 +1,11 @@
 import { watch, type FSWatcher } from "chokidar";
-import { join } from "node:path";
+import { relative } from "node:path";
 import { log } from "./logger.js";
 import { SyncEngine } from "./sync-engine.js";
 import { getCssStyleFile, extractErrorMessage } from "./utils.js";
 import type { MappingConfig, PencilSyncConfig } from "./types.js";
-import { IGNORED_GLOBS } from "./ignored-dirs.js";
+import { IGNORED_DIRS, IGNORED_GLOBS } from "./ignored-dirs.js";
+import { matches } from "./glob-matcher.js";
 
 export class Watcher {
   private watchers: FSWatcher[] = [];
@@ -97,35 +98,32 @@ export class Watcher {
     }
 
     if (direction === "code-to-pen" || direction === "both") {
-      const watchPaths = mapping.codeGlobs.map((g) =>
-        join(mapping.codeDir, g),
-      );
+      const { codeDir, codeGlobs } = mapping;
 
-      const codeWatcher = watch(watchPaths, {
+      const codeWatcher = watch(codeDir, {
         ignoreInitial: true,
         ignored: IGNORED_GLOBS,
         awaitWriteFinish: { stabilityThreshold: 300 },
       });
 
-      codeWatcher.on("change", (path) => {
-        log.debug(`Code file changed: ${path}`);
+      const onCodeEvent = (absPath: string, verb: string) => {
+        const relPath = relative(codeDir, absPath).replaceAll("\\", "/");
+        const parts = relPath.split("/");
+        if (parts.some((p) => IGNORED_DIRS.has(p))) return;
+        if (!matches(relPath, codeGlobs)) return;
+        log.debug(`Code file ${verb}: ${absPath}`);
         this.debouncedSync(mapping, "code-changed", debounceMs);
-      });
+      };
 
-      codeWatcher.on("add", (path) => {
-        log.debug(`Code file added: ${path}`);
-        this.debouncedSync(mapping, "code-changed", debounceMs);
-      });
-      codeWatcher.on("unlink", (path) => {
-        log.debug(`Code file deleted: ${path}`);
-        this.debouncedSync(mapping, "code-changed", debounceMs);
-      });
+      codeWatcher.on("change", (path) => onCodeEvent(path, "changed"));
+      codeWatcher.on("add", (path) => onCodeEvent(path, "added"));
+      codeWatcher.on("unlink", (path) => onCodeEvent(path, "deleted"));
       codeWatcher.on("error", (error) => {
-        log.error(`Watcher error for ${watchPaths.join(", ")}: ${error instanceof Error ? error.message : String(error)}`);
+        log.error(`Watcher error for ${codeDir}: ${error instanceof Error ? error.message : String(error)}`);
       });
 
       this.watchers.push(codeWatcher);
-      log.info(`Watching code: ${watchPaths.join(", ")}`);
+      log.info(`Watching code: ${codeDir} (globs: ${codeGlobs.join(", ")})`);
     }
   }
 

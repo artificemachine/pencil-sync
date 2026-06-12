@@ -71,7 +71,7 @@ export async function syncCodeToPen(
     };
   }
 
-  let penChanged = false;
+  let penChanged: boolean;
   let penSnapshot;
   try {
     const penRaw = await readFile(mapping.penFile, "utf-8");

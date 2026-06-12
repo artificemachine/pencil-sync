@@ -18,12 +18,17 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> = 
   "claude-sonnet-4-6": { input: 3, output: 15 },
   "claude-haiku-4-5-20251001": { input: 0.25, output: 1.25 },
   "claude-opus-4-6": { input: 15, output: 75 },
+  "claude-opus-4-8": { input: 15, output: 75 },
 };
 
 export function estimateCost(model: string, tokenUsage: TokenUsage): number {
-  const pricing = MODEL_PRICING[model] ?? MODEL_PRICING["claude-sonnet-4-6"];
-  return (tokenUsage.input / 1_000_000) * pricing.input +
-         (tokenUsage.output / 1_000_000) * pricing.output;
+  const pricing = MODEL_PRICING[model];
+  if (!pricing) {
+    log.warn(`Unknown model "${model}" — falling back to Sonnet pricing. Update MODEL_PRICING if needed.`);
+  }
+  const effective = pricing ?? MODEL_PRICING["claude-sonnet-4-6"];
+  return (tokenUsage.input / 1_000_000) * effective.input +
+         (tokenUsage.output / 1_000_000) * effective.output;
 }
 
 // Rough heuristic: ~4 chars per token. Used both for pre-flight estimates

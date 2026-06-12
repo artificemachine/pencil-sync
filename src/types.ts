@@ -59,6 +59,7 @@ export interface SyncResult {
   mappingId: string;
   filesChanged: string[];
   error?: string;
+  warnings?: string[];
   tokenUsage?: TokenUsage;
   penSnapshot?: PenNodeSnapshot;
 }

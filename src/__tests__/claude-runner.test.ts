@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import type { ChildProcess } from "node:child_process";
 import {
   parseTokenUsage,
@@ -64,6 +64,13 @@ describe("estimateCost", () => {
     expect(cost).toBe(90);
   });
 
+  it("prices the current Opus model id (claude-opus-4-8)", () => {
+    const cost = estimateCost("claude-opus-4-8", { input: 1_000_000, output: 1_000_000 });
+    // Opus tier: $15 input + $75 output = $90 — must NOT equal Sonnet's $18
+    expect(cost).toBe(90);
+    expect(cost).not.toBe(18);
+  });
+
   it("falls back to sonnet pricing for unknown model", () => {
     const cost = estimateCost("unknown-model", { input: 1_000_000, output: 1_000_000 });
     expect(cost).toBe(18);
@@ -71,6 +78,45 @@ describe("estimateCost", () => {
 
   it("handles zero tokens", () => {
     expect(estimateCost("claude-sonnet-4-6", { input: 0, output: 0 })).toBe(0);
+  });
+
+  it("handles empty-string model id without throwing", () => {
+    expect(() => estimateCost("", { input: 1_000, output: 1_000 })).not.toThrow();
+  });
+});
+
+describe("MODEL_PRICING contract", () => {
+  it("every entry has numeric input and output fields", () => {
+    for (const [id, pricing] of Object.entries(MODEL_PRICING)) {
+      expect(typeof pricing.input, `${id}.input`).toBe("number");
+      expect(typeof pricing.output, `${id}.output`).toBe("number");
+    }
+  });
+});
+
+describe("estimateCost — unknown model warning", () => {
+  it("warns once when an unknown model falls back to Sonnet pricing", async () => {
+    const logModule = await import("../logger.js");
+    const warnSpy = vi.spyOn(logModule.log, "warn").mockImplementation(() => {});
+    try {
+      const cost = estimateCost("totally-unknown-model-xyz", { input: 1_000_000, output: 0 });
+      expect(cost).toBe(3); // Sonnet input rate
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toMatch(/unknown.*model|fallback/i);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does not warn for a known model", async () => {
+    const logModule = await import("../logger.js");
+    const warnSpy = vi.spyOn(logModule.log, "warn").mockImplementation(() => {});
+    try {
+      estimateCost("claude-sonnet-4-6", { input: 1_000, output: 1_000 });
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 
