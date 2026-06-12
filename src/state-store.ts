@@ -5,7 +5,11 @@ import { join, relative } from "node:path";
 import { log } from "./logger.js";
 import { extractErrorMessage } from "./utils.js";
 import { IGNORED_DIRS } from "./ignored-dirs.js";
+import { matches } from "./glob-matcher.js";
 import type { SyncState, MappingState, MappingConfig, SyncDirection, PenNodeSnapshot } from "./types.js";
+
+// Re-export for backward compatibility (tests import globToRegex from state-store)
+export { globToRegex } from "./glob-matcher.js";
 
 function createEmptyState(): SyncState {
   return { version: 1, mappings: {} };
@@ -172,7 +176,7 @@ export async function hashCodeDir(
   const files = await collectFiles(codeDir, globs);
 
   for (const file of files) {
-    const relPath = normalizePathForGlob(relative(codeDir, file));
+    const relPath = relative(codeDir, file).replaceAll("\\", "/");
     hashes[relPath] = await hashFile(file);
   }
 
@@ -184,8 +188,6 @@ async function collectFiles(
   globs: string[],
 ): Promise<string[]> {
   const results: string[] = [];
-
-  const patterns = globs.map((g) => globToRegex(g));
 
   async function walk(currentDir: string): Promise<void> {
     let entries;
@@ -204,8 +206,8 @@ async function collectFiles(
         }
         await walk(fullPath);
       } else if (entry.isFile()) {
-        const relPath = normalizePathForGlob(relative(dir, fullPath));
-        if (patterns.some((p) => p.test(relPath))) {
+        const relPath = relative(dir, fullPath).replaceAll("\\", "/");
+        if (matches(relPath, globs)) {
           results.push(fullPath);
         }
       }
@@ -236,19 +238,3 @@ export function diffHashes(
   return changed.sort();
 }
 
-function normalizePathForGlob(path: string): string {
-  return path.replaceAll("\\", "/");
-}
-
-// Convert a file glob pattern (e.g. "**\/*.tsx") to an anchored RegExp.
-export function globToRegex(glob: string): RegExp {
-  let regex = glob
-    .replace(/\?/g, "[^/]")
-    .replace(/\./g, "\\.")
-    .replace(/\*\*\//g, "\0DIRGLOB\0")   // park **/ before * handling
-    .replace(/\*\*/g, "\0ANYGLOB\0")     // park ** before * handling
-    .replace(/\*/g, "[^/]*")             // single * matches non-slash chars
-    .replace(/\0DIRGLOB\0/g, "(.+/)?")   // **/ matches zero or more directories
-    .replace(/\0ANYGLOB\0/g, ".*");       // ** matches anything
-  return new RegExp(`^${regex}$`);
-}

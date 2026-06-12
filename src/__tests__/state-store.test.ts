@@ -96,6 +96,17 @@ describe("hashCodeDir", () => {
     expect(keys).toContain("comp.tsx");
     expect(keys.some((k) => k.includes(".next"))).toBe(false);
   });
+
+  it("brace patterns select tsx and jsx files", async () => {
+    await writeFile(join(dir, "Button.tsx"), "tsx");
+    await writeFile(join(dir, "Icon.jsx"), "jsx");
+    await writeFile(join(dir, "style.css"), "css");
+    const hashes = await hashCodeDir(dir, ["**/*.{tsx,jsx}"]);
+    const keys = Object.keys(hashes).sort();
+    expect(keys).toContain("Button.tsx");
+    expect(keys).toContain("Icon.jsx");
+    expect(keys).not.toContain("style.css");
+  });
 });
 
 describe("diffHashes", () => {

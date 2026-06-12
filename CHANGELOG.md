@@ -72,3 +72,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-12: fix(pen-to-code): report color fast-path no-ops instead of silent success (P2-C)
 
 - 2026-06-12: fix(budget): refresh model pricing table and warn on unknown-model fallback
+- 2026-06-12: fix(sync): unify glob matching so watcher and hasher agree on patterns (P2-B)
