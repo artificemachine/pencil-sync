@@ -80,6 +80,8 @@ export interface ClaudeRunResult {
   stderr: string;
   exitCode: number;
   tokenUsage?: TokenUsage;
+  /** True when tokenUsage is a length-based fallback estimate, not parsed from the CLI. */
+  tokenUsageEstimated?: boolean;
   mcpError?: McpErrorType;
 }
 

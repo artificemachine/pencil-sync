@@ -263,7 +263,7 @@ describe("loadConfig", () => {
       }],
     }));
 
-    await expect(loadConfig(configPath)).rejects.toThrow(/outside config directory/i);
+    await expect(loadConfig(configPath)).rejects.toThrow(/path traversal detected/i);
   });
 
   it("prevents path traversal in codeDir", async () => {
@@ -278,7 +278,7 @@ describe("loadConfig", () => {
       }],
     }));
 
-    await expect(loadConfig(configPath)).rejects.toThrow(/outside config directory/i);
+    await expect(loadConfig(configPath)).rejects.toThrow(/path traversal detected/i);
   });
 
   it("prevents path traversal in stateFile", async () => {
@@ -296,7 +296,51 @@ describe("loadConfig", () => {
       },
     }));
 
-    await expect(loadConfig(configPath)).rejects.toThrow(/outside config directory/i);
+    await expect(loadConfig(configPath)).rejects.toThrow(/path traversal detected/i);
+  });
+
+  it("rejects penFile escaping config dir via the cross-platform guard", async () => {
+    const configPath = join(dir, "pencil-sync.config.json");
+    await writeFile(configPath, JSON.stringify({
+      mappings: [{
+        id: "escape",
+        penFile: "../../etc/passwd",
+        codeDir: "code",
+        codeGlobs: ["**/*.tsx"],
+        direction: "both",
+      }],
+    }));
+    await expect(loadConfig(configPath)).rejects.toThrow(/resolves outside of/i);
+  });
+
+  it("rejects a sibling path sharing a prefix with config dir", async () => {
+    const configPath = join(dir, "pencil-sync.config.json");
+    await writeFile(configPath, JSON.stringify({
+      mappings: [{
+        id: "prefix-escape",
+        penFile: "design.pen",
+        codeDir: "../evil-sibling",
+        codeGlobs: ["**/*.tsx"],
+        direction: "both",
+      }],
+    }));
+    await expect(loadConfig(configPath)).rejects.toThrow(/path traversal detected/i);
+  });
+
+  it("accepts a nested path within config dir when sibling shares a prefix", async () => {
+    await mkdir(join(dir, "code-extra"), { recursive: true });
+    const configPath = join(dir, "pencil-sync.config.json");
+    await writeFile(configPath, JSON.stringify({
+      mappings: [{
+        id: "test",
+        penFile: "design.pen",
+        codeDir: "code-extra",
+        codeGlobs: ["**/*.tsx"],
+        direction: "both",
+      }],
+    }));
+    const config = await loadConfig(configPath);
+    expect(config.mappings[0].codeDir).toContain("code-extra");
   });
 
   it("allows valid relative paths within config directory", async () => {

@@ -22,6 +22,12 @@ import type {
 
 const ASK_USER_TIMEOUT_MS = 30_000;
 
+// Pre-flight only knows the prompt (input) size. Output is the expensive side
+// ($15-75/M vs $3-15/M) and is unknown until the response arrives, so we project
+// it conservatively as a multiple of input to avoid approving a call that the
+// generated output would push over budget.
+const ESTIMATED_OUTPUT_TOKEN_RATIO = 3;
+
 export class SyncEngine {
   private lockManager: LockManager;
   private stateStore: StateStore;
@@ -59,13 +65,17 @@ export class SyncEngine {
       return `Budget exhausted ($${this.cumulativeSpendUsd.toFixed(4)} spent of $${this.config.settings.maxBudgetUsd} limit)`;
     }
 
-    // Pre-flight estimate: if we have a prompt, estimate input cost alone
+    // Pre-flight estimate: project both input and output cost so a large
+    // generation can't slip past a check that only weighed the prompt.
     if (prompt) {
-      const estimatedInput = estimateInputTokens(prompt);
       const pricing = MODEL_PRICING[this.config.settings.model] ?? MODEL_PRICING["claude-sonnet-4-6"];
-      const estimatedInputCost = (estimatedInput / 1_000_000) * pricing.input;
-      if (estimatedInputCost > remaining) {
-        return `Estimated input cost ($${estimatedInputCost.toFixed(4)}) exceeds remaining budget ($${remaining.toFixed(4)})`;
+      const estimatedInput = estimateInputTokens(prompt);
+      const estimatedOutput = estimatedInput * ESTIMATED_OUTPUT_TOKEN_RATIO;
+      const estimatedCost =
+        (estimatedInput / 1_000_000) * pricing.input +
+        (estimatedOutput / 1_000_000) * pricing.output;
+      if (estimatedCost > remaining) {
+        return `Estimated sync cost ($${estimatedCost.toFixed(4)}, including projected output) exceeds remaining budget ($${remaining.toFixed(4)})`;
       }
     }
 

@@ -53,3 +53,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Chore
 - Add `AGENTS.md` scaffold (agent protocol compliance)
 - Update `package-lock.json` lockfile
+
+## [Unreleased]
+
+### Fixed
+- Budget pre-flight now projects output-token cost (3× input, conservative), not just input — a large generation can no longer slip past `maxBudgetUsd`
+- Claude CLI token usage falls back to a length-based estimate (with a warning) when `--verbose` output can't be parsed, instead of silently recording zero spend and disabling budget enforcement entirely
+
+### Documentation
+- Add `docs/AUDIT-2026-06-12.md` — full v0.1.3 project audit (build, tests, security, architecture, correctness, CI). Flags the `.pen` encryption/reader contradiction, budget-bypass gaps, dual glob engines, and in-memory lock manager
+
+## [0.1.4] - 2026-06-12
+
+### Refactor
+- Share one ignored-directory list (`IGNORED_DIRS` / `IGNORED_GLOBS`) between watcher and state-hasher; adds `.next` to the skip set, closing the drift where build output was hashed but not watched (P2-E)
+- Replace POSIX-only `validatePathWithinDirectory` in config.ts with the cross-platform `validatePathWithin` from utils.ts; removes the duplicate function and fixes path-traversal guard on Windows (P2-D)
+- 322 tests passing (6 new tests added across ignored-dirs and config suites)

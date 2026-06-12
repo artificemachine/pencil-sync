@@ -4,6 +4,7 @@ import { log } from "./logger.js";
 import { SyncEngine } from "./sync-engine.js";
 import { getCssStyleFile, extractErrorMessage } from "./utils.js";
 import type { MappingConfig, PencilSyncConfig } from "./types.js";
+import { IGNORED_GLOBS } from "./ignored-dirs.js";
 
 export class Watcher {
   private watchers: FSWatcher[] = [];
@@ -102,12 +103,7 @@ export class Watcher {
 
       const codeWatcher = watch(watchPaths, {
         ignoreInitial: true,
-        ignored: [
-          "**/node_modules/**",
-          "**/.git/**",
-          "**/dist/**",
-          "**/.next/**",
-        ],
+        ignored: IGNORED_GLOBS,
         awaitWriteFinish: { stabilityThreshold: 300 },
       });
 
