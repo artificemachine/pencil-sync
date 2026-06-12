@@ -75,3 +75,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-12: fix(sync): unify glob matching so watcher and hasher agree on patterns (P2-B)
 - 2026-06-12: chore(tooling): add ESLint flat config with typescript-eslint
 - 2026-06-12: chore(tooling): measure coverage and enforce thresholds (v8 provider, lines≥81%)
+- 2026-06-12: chore(release): bump to v0.1.5 (fast-path fix, glob unification, ESLint, coverage)
