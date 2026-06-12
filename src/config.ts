@@ -9,6 +9,7 @@ import type {
 } from "./types.js";
 import { DEFAULT_SETTINGS } from "./types.js";
 import { log } from "./logger.js";
+import { validatePathWithin } from "./utils.js";
 
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
@@ -22,28 +23,6 @@ function safeMerge<T>(base: T, overrides?: Partial<T>): T {
     }
   }
   return result;
-}
-
-/**
- * Validates that a resolved path is within the allowed directory.
- * Prevents path traversal attacks (e.g., ../../../../etc/passwd).
- * @throws Error if path escapes allowedDir
- */
-function validatePathWithinDirectory(
-  resolvedPath: string,
-  allowedDir: string,
-  fieldName: string,
-): void {
-  // Normalize both paths to handle symlinks and relative segments
-  const normalizedResolved = resolve(resolvedPath);
-  const normalizedAllowed = resolve(allowedDir);
-
-  // Check if the resolved path starts with the allowed directory
-  if (!normalizedResolved.startsWith(normalizedAllowed + "/") && normalizedResolved !== normalizedAllowed) {
-    throw new Error(
-      `Path traversal detected: ${fieldName} "${resolvedPath}" is outside config directory "${allowedDir}"`,
-    );
-  }
 }
 
 const CONFIG_FILENAMES = [
@@ -153,12 +132,8 @@ async function resolveMapping(
   configDir: string,
 ): Promise<MappingConfig> {
   const resolved = { ...mapping };
-  resolved.penFile = resolve(configDir, mapping.penFile);
-  resolved.codeDir = resolve(configDir, mapping.codeDir);
-
-  // Validate paths to prevent traversal attacks
-  validatePathWithinDirectory(resolved.penFile, configDir, `mapping[${mapping.id}].penFile`);
-  validatePathWithinDirectory(resolved.codeDir, configDir, `mapping[${mapping.id}].codeDir`);
+  resolved.penFile = validatePathWithin(configDir, mapping.penFile);
+  resolved.codeDir = validatePathWithin(configDir, mapping.codeDir);
 
   const projectRoot = await findProjectRoot(resolved.codeDir, configDir);
 
@@ -223,11 +198,7 @@ export async function loadConfig(
   const configDir = dirname(resolvedPath);
   const settings: Settings = safeMerge(DEFAULT_SETTINGS, parsed.settings);
 
-  // Resolve state file path relative to config
-  settings.stateFile = resolve(configDir, settings.stateFile);
-
-  // Validate stateFile to prevent path traversal
-  validatePathWithinDirectory(settings.stateFile, configDir, "settings.stateFile");
+  settings.stateFile = validatePathWithin(configDir, settings.stateFile);
 
   const mappings = await Promise.all(
     parsed.mappings.map((m) => resolveMapping(m as MappingConfig, configDir)),

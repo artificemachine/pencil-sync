@@ -86,6 +86,16 @@ describe("hashCodeDir", () => {
     const hashes = await hashCodeDir(dir, ["**/*.tsx"]);
     expect(Object.keys(hashes)).toEqual([]);
   });
+
+  it("hashCodeDir skips .next output", async () => {
+    await writeFile(join(dir, "comp.tsx"), "export const A = 1;");
+    await mkdir(join(dir, ".next"), { recursive: true });
+    await writeFile(join(dir, ".next", "x.tsx"), "// build output");
+    const hashes = await hashCodeDir(dir, ["**/*.tsx"]);
+    const keys = Object.keys(hashes);
+    expect(keys).toContain("comp.tsx");
+    expect(keys.some((k) => k.includes(".next"))).toBe(false);
+  });
 });
 
 describe("diffHashes", () => {

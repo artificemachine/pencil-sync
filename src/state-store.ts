@@ -4,6 +4,7 @@ import { readdir, rename } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { log } from "./logger.js";
 import { extractErrorMessage } from "./utils.js";
+import { IGNORED_DIRS } from "./ignored-dirs.js";
 import type { SyncState, MappingState, MappingConfig, SyncDirection, PenNodeSnapshot } from "./types.js";
 
 function createEmptyState(): SyncState {
@@ -198,7 +199,7 @@ async function collectFiles(
       const fullPath = join(currentDir, entry.name);
 
       if (entry.isDirectory()) {
-        if (entry.name === "node_modules" || entry.name === ".git" || entry.name === "dist") {
+        if (IGNORED_DIRS.has(entry.name)) {
           continue;
         }
         await walk(fullPath);

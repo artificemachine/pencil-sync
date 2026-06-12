@@ -9,17 +9,36 @@ Bidirectional sync between Pencil.dev `.pen` design files and frontend code via 
 - Stack: Node/TypeScript/Docker
 - Status: active
 
+## Guardrails
+- Never edit `.env`, credentials, or secrets.
+- Never push directly to `main` — always use a feature branch and PR.
+- `.pen` file contents are encrypted — always use Pencil MCP tools, never `Read`/`Grep` on `.pen` files.
+- Run `npm run build && npm test` before any commit.
+- Installation decoupling: once installed (e.g., via `npm link` or to `~/.local/bin`), the binary must NEVER depend on the local repository path for execution or data. All paths must be relative to the install root or use standard system config paths (`~/.config`).
+
 ## Cross-Agent Protocol
-- Read `.superharness/contract.yaml` before starting work.
-- Keep task status, ledger, and handoff updated before stopping.
+- Run `shux contract` before starting work to see tasks, statuses, and next-task suggestion.
+- Run `shux context <task-id>` to load handoff and decisions for the active task.
+- Run `shux recall <keywords>` to search past handoffs and ledger.
+- Write a handoff via `shux handoff-write` and update task status via `shux task status` before stopping.
+- Never read or edit `.superharness/` YAML files directly — always use `shux` CLI (SQLite is the source of truth).
 
 ## Commands
 
 ```bash
 npm run build        # Compile TypeScript → dist/
-npm test             # Run all tests (Vitest)
-npm run test:watch   # Tests in watch mode
+npm run dev          # Compile in watch mode (tsc --watch)
+npm test             # Run all tests (Vitest, single pass)
+npm run test:watch   # Tests in interactive watch mode
 npm start            # Run CLI (node dist/index.js)
+npm run watch        # Start file watcher (node dist/index.js watch)
+npm run sync         # One-time sync (node dist/index.js sync)
+npm link             # Install pencil-sync globally on PATH
+
+# CLI (after npm link or npm run build)
+pencil-sync init     # Generate pencil-sync.config.json
+pencil-sync sync     # One-time sync run
+pencil-sync watch    # Start watching for file changes
 ```
 
 ## Tech Stack
@@ -74,7 +93,7 @@ When the user says `contract today`, do this sequence:
 
 ### Delegation Execution (Claude -> Codex)
 When delegating to Codex, use:
-`bash /Users/user/Documents/DevOpsCelstn/superharness/scripts/delegate-to-codex.sh --project /Users/user/Documents/DevOpsCelstn/pencil-sync --task <TASK_ID>`
+`bash $HOME/DevOpsSec/superharness/scripts/delegate-to-codex.sh --project $HOME/DevOpsSec/pencil-sync --task <TASK_ID>`
 
 ### Output Contract (Strict)
 For `contract today`, if at least one `todo` or `in_progress` task has `owner: codex-cli`, the final line of your response MUST be exactly:
@@ -117,7 +136,7 @@ For `delegate <TASK_ID>` or `contract delegate <TASK_ID>`, output must be:
 1. One line: `Delegating <task_id> — <task title>`
 2. Confirmation of files written (handoff path, ledger line).
 3. Final line: the exact Codex kickoff command:
-   `bash /Users/user/Documents/DevOpsCelstn/superharness/scripts/delegate-to-codex.sh --project /Users/user/Documents/DevOpsCelstn/pencil-sync --task <TASK_ID>`
+   `bash $HOME/DevOpsSec/superharness/scripts/delegate-to-codex.sh --project $HOME/DevOpsSec/pencil-sync --task <TASK_ID>`
 
 ### Canonical contract today Output (Highest Priority)
 This section overrides any conflicting `contract today` formatting guidance above.
@@ -141,3 +160,4 @@ This section overrides any conflicting `contract today` formatting guidance abov
 - If any task is `todo` or `in_progress` and owner is `codex-cli`, the final line MUST be exactly:
   `I detected owner is codex-cli. Do you want to delegate <task_id> now?`
   Use the first matching task in contract order.
+
