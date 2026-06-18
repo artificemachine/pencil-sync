@@ -18,7 +18,29 @@ interface PenNode {
 
 const TRACKED_PROPS = ["fill", "content", "fontSize", "fontWeight", "fontFamily", "cornerRadius"] as const;
 
-function flattenPenNodes(node: PenNode, snapshot: PenNodeSnapshot): void {
+function flattenPenNodes(
+  node: PenNode,
+  snapshot: PenNodeSnapshot,
+  reusableMap: Map<string, PenNode>,
+  visited: Set<string>,
+): void {
+  // Resolve ref nodes by looking up the reusable target
+  if (node.type === "ref" && typeof node.ref === "string") {
+    const target = reusableMap.get(node.ref);
+    if (!target || !node.id) {
+      log.debug(`ref node "${node.id ?? "(no id)"}" points to missing target "${node.ref}" — skipping`);
+      return;
+    }
+    if (visited.has(node.ref)) {
+      log.warn(`Circular ref detected at "${node.id}" → "${node.ref}" — skipping`);
+      return;
+    }
+    // Resolve props from the reusable target, using the instance's id/name
+    const resolved: PenNode = { ...target, id: node.id, name: node.name ?? target.name };
+    flattenPenNodes(resolved, snapshot, reusableMap, new Set([...visited, node.ref]));
+    return;
+  }
+
   if (node.id) {
     const props: Record<string, string | number> = {};
     if (node.name) props.name = node.name;
@@ -41,7 +63,7 @@ function flattenPenNodes(node: PenNode, snapshot: PenNodeSnapshot): void {
 
   if (node.children && Array.isArray(node.children)) {
     for (const child of node.children) {
-      flattenPenNodes(child, snapshot);
+      flattenPenNodes(child, snapshot, reusableMap, visited);
     }
   }
 }
@@ -55,8 +77,13 @@ export function snapshotPenFile(penFile: string, raw: string): PenNodeSnapshot |
     const pen = JSON.parse(raw);
     const snapshot: PenNodeSnapshot = {};
 
+    // First pass: collect all reusable component definitions by id
+    const reusableMap = new Map<string, PenNode>();
+    collectReusable(pen.children ?? [], reusableMap);
+
+    // Second pass: flatten the tree, resolving ref nodes
     for (const child of (pen.children ?? [])) {
-      flattenPenNodes(child, snapshot);
+      flattenPenNodes(child, snapshot, reusableMap, new Set());
     }
 
     // Capture document-level design tokens under reserved keys prefixed with '/'.
@@ -72,6 +99,17 @@ export function snapshotPenFile(penFile: string, raw: string): PenNodeSnapshot |
   } catch (err) {
     log.error(`Failed to parse .pen file: ${err}`);
     return null;
+  }
+}
+
+function collectReusable(nodes: PenNode[], map: Map<string, PenNode>): void {
+  for (const node of nodes) {
+    if (node.reusable && node.id) {
+      map.set(node.id, node);
+    }
+    if (node.children && Array.isArray(node.children)) {
+      collectReusable(node.children, map);
+    }
   }
 }
 

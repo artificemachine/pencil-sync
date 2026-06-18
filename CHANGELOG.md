@@ -109,3 +109,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-18: docs(pen-format): correct false ".pen is encrypted" guardrail — .pen is plaintext JSON (resolves P1-A); add docs/PEN-FORMAT.md schema reference
 - 2026-06-18: fix(pen-snapshot): canonicalize object/array fill and cornerRadius so real-schema diffs are detected
 - 2026-06-18: feat(pen-snapshot): track document variables/themes as design tokens in snapshot diff
+- 2026-06-18: feat(pen-snapshot): resolve ref/reusable components when flattening the pen tree

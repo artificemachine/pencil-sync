@@ -358,3 +358,122 @@ describe("snapshotPenFile — regression (scalar hex fills unchanged)", () => {
   });
 });
 
+// ── Iteration 3: ref/reusable component resolution ───────────────────────────
+
+describe("snapshotPenFile — smoke (ref-bearing fixture)", () => {
+  it("document with reusable and ref nodes snapshots without throwing", () => {
+    const raw = serializeDoc(realisticPenDoc);
+    expect(() => snapshotPenFile("/tmp/realistic.pen", raw)).not.toThrow();
+  });
+});
+
+describe("snapshotPenFile — ref resolution", () => {
+  function makeDocWithRef(reusableProps: Record<string, unknown>, instanceId: string): string {
+    return JSON.stringify({
+      children: [
+        {
+          id: "reusable-btn",
+          name: "ButtonBase",
+          type: "frame",
+          reusable: true,
+          ...reusableProps,
+          children: [],
+        },
+        {
+          id: instanceId,
+          name: "PrimaryButton",
+          type: "ref",
+          ref: "reusable-btn",
+        },
+      ],
+    });
+  }
+
+  it("ref instance props appear in snapshot", () => {
+    const raw = makeDocWithRef({ fill: "#667eea", cornerRadius: 4 }, "btn-inst-1");
+    const snap = snapshotPenFile("/tmp/test.pen", raw)!;
+    expect(snap["btn-inst-1"]).toBeDefined();
+    expect(snap["btn-inst-1"].fill).toBe("#667eea");
+    expect(snap["btn-inst-1"].cornerRadius).toBe(4);
+  });
+
+  it("ref instance fill change is detected as a diff", () => {
+    const oldRaw = makeDocWithRef({ fill: "#667eea" }, "btn-inst-1");
+    const newRaw = makeDocWithRef({ fill: "#ff0000" }, "btn-inst-1");
+    const diffs = diffPenSnapshots(
+      snapshotPenFile("/tmp/old.pen", oldRaw)!,
+      snapshotPenFile("/tmp/new.pen", newRaw)!,
+    );
+    expect(diffs.some((d) => d.nodeId === "btn-inst-1" && d.prop === "fill")).toBe(true);
+  });
+
+  it("ref pointing at non-existent target is skipped without crash", () => {
+    const raw = JSON.stringify({
+      children: [
+        { id: "orphan-ref", name: "OrphanRef", type: "ref", ref: "does-not-exist" },
+      ],
+    });
+    expect(() => snapshotPenFile("/tmp/test.pen", raw)).not.toThrow();
+  });
+
+  it("nested reusable inside a reusable is resolved", () => {
+    const raw = JSON.stringify({
+      children: [
+        {
+          id: "inner-base",
+          name: "InnerBase",
+          type: "frame",
+          reusable: true,
+          fill: "#abc123",
+          children: [],
+        },
+        {
+          id: "outer-base",
+          name: "OuterBase",
+          type: "frame",
+          reusable: true,
+          fill: "#def456",
+          children: [{ id: "inner-ref", name: "InnerRef", type: "ref", ref: "inner-base" }],
+        },
+        { id: "outer-inst", name: "OuterInst", type: "ref", ref: "outer-base" },
+      ],
+    });
+    expect(() => snapshotPenFile("/tmp/test.pen", raw)).not.toThrow();
+    const snap = snapshotPenFile("/tmp/test.pen", raw)!;
+    expect(snap["outer-inst"]).toBeDefined();
+  });
+});
+
+describe("snapshotPenFile — chaos (circular ref)", () => {
+  it("circular ref does not crash; node is skipped", () => {
+    const raw = JSON.stringify({
+      children: [
+        { id: "a", name: "A", type: "frame", reusable: true, fill: "#fff", children: [
+          { id: "b-ref", name: "BRef", type: "ref", ref: "b" },
+        ]},
+        { id: "b", name: "B", type: "frame", reusable: true, fill: "#000", children: [
+          { id: "a-ref", name: "ARef", type: "ref", ref: "a" },
+        ]},
+        { id: "inst-a", name: "InstA", type: "ref", ref: "a" },
+      ],
+    });
+    expect(() => snapshotPenFile("/tmp/circular.pen", raw)).not.toThrow();
+  });
+});
+
+describe("snapshotPenFile — regression (no-ref docs unchanged)", () => {
+  it("documents with no ref nodes produce identical output to pre-Iter3 behaviour", () => {
+    const raw = JSON.stringify({
+      children: [
+        { id: "btn1", name: "Button", type: "frame", fill: "#667eea" },
+        { id: "txt1", name: "Title", type: "text", content: "Hello", fontSize: 24 },
+      ],
+    });
+    const snap = snapshotPenFile("/tmp/test.pen", raw)!;
+    expect(snap["btn1"]).toBeDefined();
+    expect(snap["btn1"].fill).toBe("#667eea");
+    expect(snap["txt1"].content).toBe("Hello");
+    expect(diffPenSnapshots(snap, snap)).toHaveLength(0);
+  });
+});
+
