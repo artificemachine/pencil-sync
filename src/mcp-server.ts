@@ -8,8 +8,11 @@ import { loadConfig } from "./config.js";
 import { StateStore, hashCodeDir, diffHashes } from "./state-store.js";
 import { detectConflict } from "./conflict-detector.js";
 import { snapshotPenFile, diffPenSnapshots } from "./pen-snapshot.js";
+import { buildPenToCodePrompt, buildCodeToPenPrompt } from "./prompt-builder.js";
+import { applyFillChanges } from "./pen-to-code.js";
 import { readFile } from "node:fs/promises";
 import { extractErrorMessage } from "./utils.js";
+import type { PenDiffEntry, SyncDirection } from "./types.js";
 
 const SERVER_NAME = "pencil-sync";
 const SERVER_VERSION = "0.1.5";
@@ -105,6 +108,81 @@ export function createMcpServer(): McpServer {
         const { mapping, previousState } = await loadConfigAndState(configPath, mappingId);
         const conflictInfo = await detectConflict(mapping, previousState);
         return ok(conflictInfo);
+      } catch (e) {
+        return err(extractErrorMessage(e));
+      }
+    },
+  );
+
+  const penDiffEntrySchema = z.object({
+    nodeId: z.string(),
+    nodeName: z.string(),
+    prop: z.string(),
+    oldValue: z.union([z.string(), z.number()]),
+    newValue: z.union([z.string(), z.number()]),
+  });
+
+  server.tool(
+    "pencil_build_prompt",
+    "Build the full sync prompt for a host agent to apply design changes to code (pen-to-code) or code changes to design (code-to-pen).",
+    {
+      configPath: z.string().describe("Absolute path to pencil-sync.config.json"),
+      mappingId: z.string().describe("ID of the mapping"),
+      direction: z.enum(["pen-to-code", "code-to-pen"]).describe("Sync direction"),
+      diffs: z.array(penDiffEntrySchema).optional().describe("Design property diffs (for pen-to-code)"),
+      changedFiles: z.array(z.string()).optional().describe("Changed code files (for code-to-pen)"),
+    },
+    async ({ configPath, mappingId, direction, diffs, changedFiles }) => {
+      try {
+        const { mapping } = await loadConfigAndState(configPath, mappingId);
+        let prompt: string;
+        if (direction === "pen-to-code") {
+          prompt = await buildPenToCodePrompt(mapping, undefined, diffs as PenDiffEntry[] | undefined);
+        } else if (direction === "code-to-pen") {
+          prompt = await buildCodeToPenPrompt(mapping, changedFiles ?? []);
+        } else {
+          return err(`Invalid direction: ${String(direction)}. Must be 'pen-to-code' or 'code-to-pen'.`);
+        }
+        return ok({ prompt, direction, mappingId });
+      } catch (e) {
+        return err(extractErrorMessage(e));
+      }
+    },
+  );
+
+  server.tool(
+    "pencil_apply_fill_changes",
+    "Apply deterministic color (fill) changes directly to CSS variable files without needing LLM assistance.",
+    {
+      configPath: z.string().describe("Absolute path to pencil-sync.config.json"),
+      mappingId: z.string().describe("ID of the mapping"),
+      fills: z.array(penDiffEntrySchema).describe("Fill property diffs to apply"),
+    },
+    async ({ configPath, mappingId, fills }) => {
+      try {
+        const { mapping } = await loadConfigAndState(configPath, mappingId);
+        const fillResult = await applyFillChanges(mapping, fills as PenDiffEntry[]);
+        return ok({ filesChanged: fillResult.filesChanged, errors: fillResult.errors });
+      } catch (e) {
+        return err(extractErrorMessage(e));
+      }
+    },
+  );
+
+  server.tool(
+    "pencil_record_sync",
+    "Record that a sync has completed by updating the state store with current file hashes. Call this after the host agent has applied all edits.",
+    {
+      configPath: z.string().describe("Absolute path to pencil-sync.config.json"),
+      mappingId: z.string().describe("ID of the mapping"),
+      direction: z.enum(["pen-to-code", "code-to-pen", "both"]).describe("The sync direction that was applied"),
+      filesChanged: z.array(z.string()).describe("List of files that were changed"),
+    },
+    async ({ configPath, mappingId, direction, filesChanged }) => {
+      try {
+        const { mapping, store } = await loadConfigAndState(configPath, mappingId);
+        await store.updateMappingState(mapping, direction as SyncDirection);
+        return ok({ ok: true, mappingId, direction, filesChanged });
       } catch (e) {
         return err(extractErrorMessage(e));
       }

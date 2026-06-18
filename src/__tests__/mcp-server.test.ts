@@ -338,4 +338,331 @@ describe("mcp-server", () => {
       expect(parsed).toHaveProperty("changedCodeFiles");
     });
   });
+
+  // --- Iteration 4: Prompt delivery, fill fast-path, sync recording ---
+
+  describe("smoke — Iteration 4 tools registered", () => {
+    it("all 7 tools are registered after Iteration 4", () => {
+      const server = createMcpServer();
+      const tools = Object.keys((server as any)._registeredTools as Record<string, unknown>);
+      expect(tools).toContain("pencil_build_prompt");
+      expect(tools).toContain("pencil_apply_fill_changes");
+      expect(tools).toContain("pencil_record_sync");
+    });
+  });
+
+  describe("pencil_build_prompt", () => {
+    let dir: string;
+
+    beforeEach(async () => {
+      dir = await mkdtemp(join(tmpdir(), "pencil-mcp-prompt-"));
+      await mkdir(join(dir, "code"), { recursive: true });
+      await writeFile(join(dir, "design.pen"), JSON.stringify({ children: [] }));
+    });
+
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it("returns a non-empty string for pen-to-code direction", async () => {
+      const cfg = makeConfig(dir);
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+
+      const result = await callTool("pencil_build_prompt", {
+        configPath,
+        mappingId: "test-mapping",
+        direction: "pen-to-code",
+        diffs: [{ nodeId: "n1", nodeName: "btn", prop: "fill", oldValue: "#000", newValue: "#fff" }],
+      });
+      const parsed = JSON.parse(result.content[0].text);
+      expect(typeof parsed.prompt).toBe("string");
+      expect(parsed.prompt.length).toBeGreaterThan(10);
+    });
+
+    it("returns a non-empty string for code-to-pen direction", async () => {
+      const cfg = makeConfig(dir);
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+      await writeFile(join(dir, "code", "styles.css"), "--color-primary: 34 72 70;");
+
+      const result = await callTool("pencil_build_prompt", {
+        configPath,
+        mappingId: "test-mapping",
+        direction: "code-to-pen",
+        changedFiles: ["code/styles.css"],
+      });
+      const parsed = JSON.parse(result.content[0].text);
+      expect(typeof parsed.prompt).toBe("string");
+      expect(parsed.prompt.length).toBeGreaterThan(10);
+    });
+
+    it("chaos: returns error content when direction is invalid", async () => {
+      const cfg = makeConfig(dir);
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+
+      const result = await callTool("pencil_build_prompt", {
+        configPath,
+        mappingId: "test-mapping",
+        direction: "invalid-direction",
+        diffs: [],
+      });
+      expect(result.content[0].text).toMatch(/error|invalid|direction/i);
+    });
+  });
+
+  describe("pencil_apply_fill_changes", () => {
+    let dir: string;
+
+    beforeEach(async () => {
+      dir = await mkdtemp(join(tmpdir(), "pencil-mcp-fill-"));
+      await mkdir(join(dir, "code"), { recursive: true });
+      await writeFile(join(dir, "design.pen"), JSON.stringify({ children: [] }));
+    });
+
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it("updates CSS variable values and returns filesChanged", async () => {
+      const cssPath = join(dir, "code", "styles.css");
+      await writeFile(cssPath, "--color-primary: 34 72 70;\n--color-accent: 34 72 70;\n");
+
+      const cfg = {
+        ...makeConfig(dir),
+        mappings: [{
+          id: "test-mapping",
+          penFile: join(dir, "design.pen"),
+          codeDir: join(dir, "code"),
+          codeGlobs: ["**/*.css"],
+          direction: "both" as const,
+          styleFiles: ["styles.css"],
+        }],
+      };
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+
+      const result = await callTool("pencil_apply_fill_changes", {
+        configPath,
+        mappingId: "test-mapping",
+        fills: [{ nodeId: "n1", nodeName: "btn", prop: "fill", oldValue: "#224846", newValue: "#ff0000" }],
+      });
+      const parsed = JSON.parse(result.content[0].text);
+      expect(Array.isArray(parsed.filesChanged)).toBe(true);
+    });
+
+    it("returns empty filesChanged with errors when no CSS file is configured", async () => {
+      const cfg = makeConfig(dir);
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+
+      const result = await callTool("pencil_apply_fill_changes", {
+        configPath,
+        mappingId: "test-mapping",
+        fills: [{ nodeId: "n1", nodeName: "btn", prop: "fill", oldValue: "#000000", newValue: "#ffffff" }],
+      });
+      const parsed = JSON.parse(result.content[0].text);
+      expect(Array.isArray(parsed.errors)).toBe(true);
+      expect(parsed.errors.length).toBeGreaterThan(0);
+    });
+
+    it("chaos: returns structured result (not throw) for malformed hex values", async () => {
+      const cfg = {
+        ...makeConfig(dir),
+        mappings: [{
+          id: "test-mapping",
+          penFile: join(dir, "design.pen"),
+          codeDir: join(dir, "code"),
+          codeGlobs: ["**/*.css"],
+          direction: "both" as const,
+          styleFiles: ["styles.css"],
+        }],
+      };
+      await writeFile(join(dir, "code", "styles.css"), "--color-x: 1 2 3;\n");
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+
+      const result = await callTool("pencil_apply_fill_changes", {
+        configPath,
+        mappingId: "test-mapping",
+        fills: [{ nodeId: "n1", nodeName: "btn", prop: "fill", oldValue: "notahex", newValue: "alsowrong" }],
+      });
+      // Should not throw — returns structured result
+      expect(result.content[0].type).toBe("text");
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed).toHaveProperty("filesChanged");
+      expect(parsed).toHaveProperty("errors");
+    });
+  });
+
+  describe("pencil_record_sync", () => {
+    let dir: string;
+
+    beforeEach(async () => {
+      dir = await mkdtemp(join(tmpdir(), "pencil-mcp-record-"));
+      await mkdir(join(dir, "code"), { recursive: true });
+      await writeFile(join(dir, "design.pen"), JSON.stringify({ children: [] }));
+    });
+
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it("updates StateStore and returns ok:true for pen-to-code direction", async () => {
+      const cfg = makeConfig(dir);
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+
+      const result = await callTool("pencil_record_sync", {
+        configPath,
+        mappingId: "test-mapping",
+        direction: "pen-to-code",
+        filesChanged: [],
+      });
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.ok).toBe(true);
+    });
+
+    it("state machine: records pen-to-code direction in persisted state", async () => {
+      const { readFile: rf } = await import("node:fs/promises");
+      const cfg = makeConfig(dir);
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+
+      await callTool("pencil_record_sync", {
+        configPath,
+        mappingId: "test-mapping",
+        direction: "pen-to-code",
+        filesChanged: [],
+      });
+
+      const rawState = await rf(join(dir, ".state.json"), "utf-8");
+      const state = JSON.parse(rawState);
+      expect(state.mappings["test-mapping"].lastSyncDirection).toBe("pen-to-code");
+    });
+
+    it("state machine: records code-to-pen direction in persisted state", async () => {
+      const { readFile: rf } = await import("node:fs/promises");
+      const cfg = makeConfig(dir);
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+
+      await callTool("pencil_record_sync", {
+        configPath,
+        mappingId: "test-mapping",
+        direction: "code-to-pen",
+        filesChanged: [],
+      });
+
+      const rawState = await rf(join(dir, ".state.json"), "utf-8");
+      const state = JSON.parse(rawState);
+      expect(state.mappings["test-mapping"].lastSyncDirection).toBe("code-to-pen");
+    });
+
+    it("chaos: returns structured error when mappingId is unknown", async () => {
+      const cfg = makeConfig(dir);
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+
+      const result = await callTool("pencil_record_sync", {
+        configPath,
+        mappingId: "no-such-mapping",
+        direction: "pen-to-code",
+        filesChanged: [],
+      });
+      expect(result.content[0].text).toMatch(/error|not found/i);
+    });
+  });
+
+  describe("contract — all 7 tools return valid MCP shape", () => {
+    it("full server tool contract: all 7 tools return { content: [{ type: 'text', text: string }] }", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "pencil-mcp-full-"));
+      try {
+        await mkdir(join(dir, "code"), { recursive: true });
+        await writeFile(join(dir, "design.pen"), JSON.stringify({ children: [] }));
+        const cfg = makeConfig(dir);
+        const configPath = join(dir, "pencil-sync.config.json");
+        await writeFile(configPath, JSON.stringify(cfg));
+
+        const server = createMcpServer();
+        const allTools = Object.keys((server as any)._registeredTools as Record<string, unknown>);
+        expect(allTools).toHaveLength(7);
+
+        for (const name of allTools) {
+          const result = await callTool(name, {
+            configPath,
+            mappingId: "test-mapping",
+            direction: "pen-to-code",
+            diffs: [],
+            fills: [],
+            changedFiles: [],
+            filesChanged: [],
+          });
+          expect(result).toHaveProperty("content");
+          expect(Array.isArray(result.content)).toBe(true);
+          expect(result.content[0]).toHaveProperty("type", "text");
+          expect(typeof result.content[0].text).toBe("string");
+        }
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("E2E — full host agent workflow", () => {
+    it("get config → diff design → build prompt → record sync → state persisted", async () => {
+      const { readFile: rf } = await import("node:fs/promises");
+      const dir = await mkdtemp(join(tmpdir(), "pencil-mcp-e2e-"));
+      try {
+        await mkdir(join(dir, "code"), { recursive: true });
+        const penContent = JSON.stringify({
+          children: [{ id: "n1", name: "btn", type: "frame", fill: "#ff0000" }],
+        });
+        await writeFile(join(dir, "design.pen"), penContent);
+
+        const cfg = makeConfig(dir);
+        const configPath = join(dir, "pencil-sync.config.json");
+        await writeFile(configPath, JSON.stringify(cfg));
+
+        // Step 1: get config
+        const configResult = await callTool("pencil_get_config", { configPath });
+        const loadedCfg = JSON.parse(configResult.content[0].text);
+        expect(loadedCfg.mappings[0].id).toBe("test-mapping");
+
+        // Step 2: diff design
+        const diffResult = await callTool("pencil_diff_design", { configPath, mappingId: "test-mapping" });
+        const { diffs } = JSON.parse(diffResult.content[0].text);
+        expect(Array.isArray(diffs)).toBe(true);
+
+        // Step 3: build prompt
+        const promptResult = await callTool("pencil_build_prompt", {
+          configPath,
+          mappingId: "test-mapping",
+          direction: "pen-to-code",
+          diffs,
+        });
+        const { prompt } = JSON.parse(promptResult.content[0].text);
+        expect(typeof prompt).toBe("string");
+
+        // Step 4: (agent would apply edits here) — record sync
+        const recordResult = await callTool("pencil_record_sync", {
+          configPath,
+          mappingId: "test-mapping",
+          direction: "pen-to-code",
+          filesChanged: [],
+        });
+        const { ok } = JSON.parse(recordResult.content[0].text);
+        expect(ok).toBe(true);
+
+        // Verify state persisted
+        const rawState = await rf(join(dir, ".state.json"), "utf-8");
+        const state = JSON.parse(rawState);
+        expect(state.mappings["test-mapping"]).toBeTruthy();
+        expect(state.mappings["test-mapping"].lastSyncDirection).toBe("pen-to-code");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
 });

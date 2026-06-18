@@ -13,7 +13,7 @@ vi.mock("../prompt-builder.js", () => ({
   buildPenToCodePrompt: vi.fn().mockResolvedValue("test prompt"),
 }));
 
-const { syncPenToCode } = await import("../pen-to-code.js");
+const { syncPenToCode, applyFillChanges } = await import("../pen-to-code.js");
 const { runClaude } = await import("../claude-runner.js");
 
 const mockedRunClaude = vi.mocked(runClaude);
@@ -650,6 +650,37 @@ describe("syncPenToCode", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("Claude CLI failed");
+    });
+  });
+
+  describe("regression — applyFillChanges export backward compatibility", () => {
+    it("applyFillChanges is exported and returns FillChangeResult shape", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "fill-export-compat-"));
+      try {
+        await mkdir(join(dir, "code"), { recursive: true });
+        const cssPath = join(dir, "code", "styles.css");
+        await writeFile(cssPath, "--color-primary: 34 72 70;\n");
+
+        const mapping: MappingConfig = {
+          id: "test",
+          penFile: join(dir, "design.pen"),
+          codeDir: join(dir, "code"),
+          codeGlobs: ["**/*.css"],
+          direction: "both",
+          styleFiles: ["styles.css"],
+        };
+
+        const result = await applyFillChanges(mapping, [
+          { nodeId: "n1", nodeName: "btn", prop: "fill", oldValue: "#224846", newValue: "#ffffff" },
+        ]);
+
+        expect(result).toHaveProperty("filesChanged");
+        expect(result).toHaveProperty("errors");
+        expect(Array.isArray(result.filesChanged)).toBe(true);
+        expect(Array.isArray(result.errors)).toBe(true);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
     });
   });
 });

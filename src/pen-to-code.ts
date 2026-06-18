@@ -41,7 +41,7 @@ function recordError(result: FillChangeResult, msg: string, level: "warn" | "err
  *
  * Returns structured FillChangeResult with both filesChanged and errors.
  */
-async function applyFillChanges(
+export async function applyFillChanges(
   mapping: MappingConfig,
   fillDiffs: PenDiffEntry[],
 ): Promise<FillChangeResult> {
