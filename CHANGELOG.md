@@ -104,3 +104,5 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-18: feat(tui): EventFeed component + SyncEngine.onEvent callback for live updates
 - 2026-06-18: feat(tui): keybinds (s/d/q), BudgetMeter, and full pencil-sync tui command wired
 - 2026-06-18: chore(release): bump to v0.4.0 (setup wizard back-nav + TUI dashboard with ink/react)
+- 2026-06-18: fix(tui): wire tui command to load config and pass to startTui; load states from StateStore
+- 2026-06-18: chore(release): bump to v0.4.1 (tui wiring fix)
