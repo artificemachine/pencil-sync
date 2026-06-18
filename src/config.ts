@@ -1,5 +1,5 @@
-import { readFile, access } from "node:fs/promises";
-import { resolve, dirname, join } from "node:path";
+import { readFile, access, readdir } from "node:fs/promises";
+import { resolve, dirname, join, relative } from "node:path";
 import type {
   PencilSyncConfig,
   MappingConfig,
@@ -78,6 +78,14 @@ export async function detectFramework(
   return "unknown";
 }
 
+async function readPackageJson(dir: string): Promise<Record<string, unknown> | null> {
+  try {
+    return JSON.parse(await readFile(join(dir, "package.json"), "utf-8")) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 export async function detectStyling(projectDir: string): Promise<Styling> {
   const tailwindIndicators = [
     "tailwind.config.js",
@@ -93,19 +101,56 @@ export async function detectStyling(projectDir: string): Promise<Styling> {
     }
   }
 
-  const pkgPath = join(projectDir, "package.json");
-  if (await fileExists(pkgPath)) {
-    try {
-      const pkg = JSON.parse(await readFile(pkgPath, "utf-8"));
-      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-      if (deps["tailwindcss"]) return "tailwind";
-      if (deps["styled-components"]) return "styled-components";
-    } catch {
-      // Malformed package.json — fall through to "unknown"
-    }
+  // Scan directory for css-modules and css indicators
+  let entries: string[] = [];
+  try {
+    entries = (await readdir(projectDir)).filter((e) => typeof e === "string") as string[];
+  } catch {
+    // Unreadable dir — skip file scanning
+  }
+
+  if (entries.some((e) => e.endsWith(".module.css"))) {
+    return "css-modules";
+  }
+
+  const pkg = await readPackageJson(projectDir);
+  if (pkg) {
+    const deps = { ...(pkg.dependencies as Record<string, unknown>), ...(pkg.devDependencies as Record<string, unknown>) };
+    if (deps["tailwindcss"]) return "tailwind";
+    if (deps["styled-components"]) return "styled-components";
+  }
+
+  if (entries.some((e) => e.endsWith(".css"))) {
+    return "css";
   }
 
   return "unknown";
+}
+
+export async function findPenFiles(searchDir: string, maxDepth = 5): Promise<string[]> {
+  const results: string[] = [];
+
+  async function recurse(dir: string, depth: number): Promise<void> {
+    if (depth > maxDepth) return;
+    let dirEntries;
+    try {
+      dirEntries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of dirEntries) {
+      const name = entry.name;
+      if (entry.isDirectory()) {
+        if (name === "node_modules" || name.startsWith(".")) continue;
+        await recurse(join(dir, name), depth + 1);
+      } else if (name.endsWith(".pen")) {
+        results.push("./" + relative(searchDir, join(dir, name)));
+      }
+    }
+  }
+
+  await recurse(searchDir, 0);
+  return results;
 }
 
 async function findProjectRoot(codeDir: string, configDir: string): Promise<string> {
