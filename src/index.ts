@@ -7,6 +7,7 @@ import { readFile, writeFile, access } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
+import { runDoctor } from "./doctor.js";
 import { setLogLevel, log } from "./logger.js";
 import { SyncEngine } from "./sync-engine.js";
 import { Watcher } from "./watcher.js";
@@ -166,7 +167,7 @@ program
         model: "claude-sonnet-4-6",
         maxBudgetUsd: 0.5,
         conflictStrategy: "prompt",
-        stateFile: ".pencil-sync-state.json",
+        stateFile: ".pencil-sync/state.json",
         logLevel: "info",
       },
     };
@@ -174,6 +175,17 @@ program
     await writeFile(configPath, JSON.stringify(template, null, 2));
     log.success(`Config created: ${configPath}`);
     log.info("Edit the config to set your .pen file and code directory paths.");
+  });
+
+program
+  .command("doctor")
+  .description("Run preflight checks for the current project")
+  .action(async () => {
+    const globalOpts = program.opts();
+    if (globalOpts.verbose) setLogLevel("debug");
+
+    const result = await runDoctor(globalOpts.config);
+    process.exit(result.allPassed ? 0 : 1);
   });
 
 program
