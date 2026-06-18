@@ -102,3 +102,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-18: feat(tui): ink/react deps, JSX config, logger TUI hook, tui command skeleton
 - 2026-06-18: feat(tui): static MappingPanel component with mapping state snapshot
 - 2026-06-18: feat(tui): EventFeed component + SyncEngine.onEvent callback for live updates
+- 2026-06-18: feat(tui): keybinds (s/d/q), BudgetMeter, and full pencil-sync tui command wired
