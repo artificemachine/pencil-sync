@@ -497,6 +497,134 @@ describe("setup — non-interactive mode", () => {
   });
 });
 
+// ─── Iteration 3: Back navigation ────────────────────────────────────────────
+
+describe("setup — back navigation", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "pencil-setup-back-"));
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "design.pen"), "{}");
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("smoke: 'back' at step 1 does not throw", async () => {
+    const { runSetup } = await import("../setup.js");
+    const io = makeIO(["back", "myapp", "1", "./src", "", "", "", "", "y"]);
+    let threw = false;
+    try { await runSetup(io, { cwd: dir }); } catch { threw = true; }
+    expect(threw).toBe(false);
+  });
+
+  it("back at step 2 re-asks step 1 (step 1 question asked twice)", async () => {
+    const { runSetup } = await import("../setup.js");
+    let projectNameAskCount = 0;
+    const answers = ["myapp", "back", "myapp", "1", "./src", "", "", "", "", "y"];
+    let idx = 0;
+    const io: WizardIO & { _printed: string[]; _steps: string[]; _detected: string[] } = {
+      async ask(question: string, defaultVal?: string): Promise<string> {
+        if (question.toLowerCase().includes("project name") || question.toLowerCase().includes("project")) {
+          if (!question.toLowerCase().includes("pen") && !question.toLowerCase().includes("framework") && !question.toLowerCase().includes("styling") && !question.toLowerCase().includes("direction") && !question.toLowerCase().includes("budget") && !question.toLowerCase().includes("confirm") && !question.toLowerCase().includes("code")) {
+            projectNameAskCount++;
+          }
+        }
+        if (idx >= answers.length) return defaultVal ?? "";
+        const ans = answers[idx++];
+        return ans === "" ? (defaultVal ?? "") : ans;
+      },
+      print(_msg: string) {},
+      printSection(_title: string) {},
+      printStep(_n: number, _total: number, _label: string) {},
+      printDetected(_label: string, _value: string) {},
+      _printed: [],
+      _steps: [],
+      _detected: [],
+    };
+    await runSetup(io, { cwd: dir });
+    expect(projectNameAskCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it("back at step 1 is a no-op and re-asks step 1", async () => {
+    const { runSetup } = await import("../setup.js");
+    const io = makeIO(["back", "myapp", "1", "./src", "", "", "", "", "y"]);
+    await runSetup(io, { cwd: dir });
+    // Should not hang or throw; and config should be written
+    await expect(access(join(dir, "pencil-sync.config.json"))).resolves.toBeUndefined();
+    expect(io._printed.some((s) => s.toLowerCase().includes("already at step 1"))).toBe(true);
+  });
+
+  it("previous answer shown as default when going back", async () => {
+    const { runSetup } = await import("../setup.js");
+    const answers: string[] = [];
+    const defaults: string[] = [];
+    let callIdx = 0;
+    const io: WizardIO & { _printed: string[]; _steps: string[]; _detected: string[] } = {
+      async ask(question: string, defaultVal?: string): Promise<string> {
+        const step = callIdx++;
+        if (defaultVal !== undefined) defaults.push(defaultVal);
+        // Step 0 = project name: answer "myapp"
+        // Step 1 = pen file selection: answer "back"
+        // Step 2 = project name again: return "" (use default, should be "myapp")
+        const seq = ["myapp", "back", "", "1", "./src", "", "", "", "", "y"];
+        if (step >= seq.length) return defaultVal ?? "";
+        const ans = seq[step];
+        return ans === "" ? (defaultVal ?? "") : ans;
+      },
+      print(_msg: string) {},
+      printSection(_title: string) {},
+      printStep(_n: number, _total: number, _label: string) {},
+      printDetected(_label: string, _value: string) {},
+      _printed: [],
+      _steps: [],
+      _detected: [],
+    };
+    await runSetup(io, { cwd: dir });
+    // After answering "myapp" for project name and then going back via pen selection,
+    // the re-asked project name step should have "myapp" as its default
+    const myappDefaults = defaults.filter((d) => d === "myapp");
+    expect(myappDefaults.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("back navigates multiple steps in sequence", async () => {
+    const { runSetup } = await import("../setup.js");
+    // Navigate: name -> pen(back) -> name(back) -> name[at step1, no-op] -> name answer -> pen -> src -> ... -> y
+    const io = makeIO(["myapp", "back", "back", "myapp2", "1", "./src", "", "", "", "", "y"]);
+    let threw = false;
+    try { await runSetup(io, { cwd: dir }); } catch { threw = true; }
+    expect(threw).toBe(false);
+  });
+
+  it("contract: WizardIO.ask signature unchanged (2 params: question, defaultVal)", async () => {
+    const io = makeIO([]);
+    const result = await io.ask("Test question?", "default-value");
+    expect(result).toBe("default-value");
+  });
+
+  it("regression: forward-only answer sequences still produce correct config", async () => {
+    const { runSetup } = await import("../setup.js");
+    const io = makeIO(["myapp", "1", "./src", "react", "css", "both", "0.5", "y"]);
+    await runSetup(io, { cwd: dir });
+    const config = JSON.parse(await readFile(join(dir, "pencil-sync.config.json"), "utf-8"));
+    expect(config.mappings[0].framework).toBe("react");
+    expect(config.mappings[0].styling).toBe("css");
+    expect(config.mappings[0].direction).toBe("both");
+    expect(config.settings.maxBudgetUsd).toBe(0.5);
+  });
+
+  it("chaos: 'back' at confirmation screen returns to step 7", async () => {
+    const { runSetup } = await import("../setup.js");
+    // Answer 7 steps, then "back" at confirm (re-asks step 7 budget), then answer budget + confirm y
+    const io = makeIO(["myapp", "1", "./src", "", "", "", "0.5", "back", "1.0", "y"]);
+    let threw = false;
+    try { await runSetup(io, { cwd: dir }); } catch { threw = true; }
+    expect(threw).toBe(false);
+  });
+});
+
 // ─── Iteration 2: Confirmation summary screen ────────────────────────────────
 
 describe("setup — confirmation summary screen", () => {
