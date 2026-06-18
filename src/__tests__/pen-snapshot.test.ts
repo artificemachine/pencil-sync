@@ -1,4 +1,12 @@
 import { describe, it, expect } from "vitest";
+import {
+  realisticPenDoc,
+  gradientFill,
+  gradientFillAlt,
+  cornerRadiusPerSide,
+  cornerRadiusUniform,
+  serializeDoc,
+} from "./fixtures/realistic.pen.js";
 
 const {
   snapshotPenFile, diffPenSnapshots,
@@ -152,6 +160,123 @@ describe("diffPenSnapshots", () => {
   it("returns empty array when both snapshots are empty", () => {
     const diffs = diffPenSnapshots({}, {});
     expect(diffs).toHaveLength(0);
+  });
+});
+
+// ── Iteration 1: real-schema complex value tests ─────────────────────────────
+
+describe("snapshotPenFile — smoke (real-schema fixture)", () => {
+  it("imports and snapshots realistic fixture without throwing", () => {
+    const raw = serializeDoc(realisticPenDoc);
+    const snapshot = snapshotPenFile("/tmp/realistic.pen", raw);
+    expect(snapshot).not.toBeNull();
+    expect(typeof snapshot).toBe("object");
+  });
+});
+
+describe("snapshotPenFile — complex fill values", () => {
+  it("stores gradient fill as a stable string (not [object Object])", () => {
+    const pen = JSON.stringify({
+      children: [{ id: "n1", name: "Hero", type: "frame", fill: gradientFill }],
+    });
+    const snapshot = snapshotPenFile("/tmp/test.pen", pen)!;
+    expect(typeof snapshot["n1"].fill).toBe("string");
+    expect(snapshot["n1"].fill).not.toBe("[object Object]");
+  });
+
+  it("two distinct gradient fills on same node produce 1 diff", () => {
+    const oldPen = JSON.stringify({
+      children: [{ id: "n1", name: "Hero", type: "frame", fill: gradientFill }],
+    });
+    const newPen = JSON.stringify({
+      children: [{ id: "n1", name: "Hero", type: "frame", fill: gradientFillAlt }],
+    });
+    const oldSnap = snapshotPenFile("/tmp/old.pen", oldPen)!;
+    const newSnap = snapshotPenFile("/tmp/new.pen", newPen)!;
+    const diffs = diffPenSnapshots(oldSnap, newSnap);
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0].prop).toBe("fill");
+  });
+
+  it("identical gradient objects with different key order produce 0 diffs", () => {
+    const gradientKeyOrderA = { stops: gradientFill.stops, type: gradientFill.type, angle: gradientFill.angle };
+    const gradientKeyOrderB = { angle: gradientFill.angle, type: gradientFill.type, stops: gradientFill.stops };
+    const oldPen = JSON.stringify({
+      children: [{ id: "n1", name: "Hero", type: "frame", fill: gradientKeyOrderA }],
+    });
+    const newPen = JSON.stringify({
+      children: [{ id: "n1", name: "Hero", type: "frame", fill: gradientKeyOrderB }],
+    });
+    const oldSnap = snapshotPenFile("/tmp/old.pen", oldPen)!;
+    const newSnap = snapshotPenFile("/tmp/new.pen", newPen)!;
+    const diffs = diffPenSnapshots(oldSnap, newSnap);
+    expect(diffs).toHaveLength(0);
+  });
+
+  it("fill array reorder produces a diff", () => {
+    const fillA = [{ type: "solid", color: "#667eea" }, { type: "solid", color: "#764ba2" }];
+    const fillB = [{ type: "solid", color: "#764ba2" }, { type: "solid", color: "#667eea" }];
+    const oldPen = JSON.stringify({ children: [{ id: "n1", name: "CTA", type: "frame", fill: fillA }] });
+    const newPen = JSON.stringify({ children: [{ id: "n1", name: "CTA", type: "frame", fill: fillB }] });
+    const diffs = diffPenSnapshots(
+      snapshotPenFile("/tmp/old.pen", oldPen)!,
+      snapshotPenFile("/tmp/new.pen", newPen)!,
+    );
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0].prop).toBe("fill");
+  });
+
+  it("identical fill arrays produce 0 diffs", () => {
+    const fill = [{ type: "solid", color: "#667eea" }, { type: "solid", color: "#764ba2" }];
+    const pen = JSON.stringify({ children: [{ id: "n1", name: "CTA", type: "frame", fill }] });
+    const snap = snapshotPenFile("/tmp/test.pen", pen)!;
+    expect(diffPenSnapshots(snap, snap)).toHaveLength(0);
+  });
+});
+
+describe("snapshotPenFile — complex cornerRadius values", () => {
+  it("cornerRadius [8,8,0,0] → [8,8,8,8] produces a diff", () => {
+    const oldPen = JSON.stringify({ children: [{ id: "n1", name: "Card", type: "frame", fill: "#fff", cornerRadius: cornerRadiusPerSide }] });
+    const newPen = JSON.stringify({ children: [{ id: "n1", name: "Card", type: "frame", fill: "#fff", cornerRadius: cornerRadiusUniform }] });
+    const diffs = diffPenSnapshots(
+      snapshotPenFile("/tmp/old.pen", oldPen)!,
+      snapshotPenFile("/tmp/new.pen", newPen)!,
+    );
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0].prop).toBe("cornerRadius");
+  });
+
+  it("scalar cornerRadius 8 → [8,8,8,8] transition produces a diff", () => {
+    const oldPen = JSON.stringify({ children: [{ id: "n1", name: "Card", type: "frame", fill: "#fff", cornerRadius: 8 }] });
+    const newPen = JSON.stringify({ children: [{ id: "n1", name: "Card", type: "frame", fill: "#fff", cornerRadius: [8, 8, 8, 8] }] });
+    const diffs = diffPenSnapshots(
+      snapshotPenFile("/tmp/old.pen", oldPen)!,
+      snapshotPenFile("/tmp/new.pen", newPen)!,
+    );
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0].prop).toBe("cornerRadius");
+  });
+});
+
+describe("snapshotPenFile — chaos", () => {
+  it("malformed fill object does not crash; node is still tracked", () => {
+    const circular: Record<string, unknown> = { type: "weird" };
+    circular.self = circular;
+    const pen = JSON.stringify({
+      children: [{ id: "n1", name: "Weird", type: "frame", fill: "#fff" }],
+    });
+    expect(() => snapshotPenFile("/tmp/test.pen", pen)).not.toThrow();
+  });
+});
+
+describe("snapshotPenFile — regression (scalar hex fills unchanged)", () => {
+  it("scalar hex fill change still detected correctly", () => {
+    const oldSnap = { btn1: { name: "submitBtn", type: "frame", fill: "#00ff00" } };
+    const newSnap = { btn1: { name: "submitBtn", type: "frame", fill: "#ff0000" } };
+    const diffs = diffPenSnapshots(oldSnap, newSnap);
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0].oldValue).toBe("#00ff00");
+    expect(diffs[0].newValue).toBe("#ff0000");
   });
 });
 

@@ -1,16 +1,17 @@
 import { log } from "./logger.js";
+import { stableStringify } from "./utils.js";
 import type { PenNodeSnapshot, PenDiffEntry } from "./types.js";
 
 interface PenNode {
   id?: string;
   name?: string;
   type?: string;
-  fill?: string;
+  fill?: unknown;       // string | gradient object | image | array of fills
   content?: string;
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: string;
-  cornerRadius?: number;
+  cornerRadius?: unknown; // number | [top, right, bottom, left]
   children?: PenNode[];
   [key: string]: unknown;
 }
@@ -23,8 +24,13 @@ function flattenPenNodes(node: PenNode, snapshot: PenNodeSnapshot): void {
     if (node.name) props.name = node.name;
     if (node.type) props.type = node.type;
     for (const prop of TRACKED_PROPS) {
-      if (node[prop] !== undefined && node[prop] !== null) {
-        props[prop] = node[prop] as string | number;
+      const val = node[prop];
+      if (val !== undefined && val !== null) {
+        // Scalars stored as-is; complex values (objects/arrays) canonicalized
+        // to a stable JSON string so diffs survive key-order differences.
+        props[prop] = (typeof val === "string" || typeof val === "number")
+          ? val
+          : stableStringify(val);
       }
     }
     // Require at least name/type + one visual property to be worth tracking

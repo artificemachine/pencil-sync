@@ -3,6 +3,7 @@ import { mkdtemp, writeFile, readFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { MappingConfig, MappingState, Settings, PenNodeSnapshot } from "../types.js";
+import { gradientFill, gradientFillAlt, serializeDoc, realisticPenDoc } from "./fixtures/realistic.pen.js";
 
 // Mock claude-runner before importing the module under test
 vi.mock("../claude-runner.js", () => ({
@@ -682,5 +683,113 @@ describe("syncPenToCode", () => {
         await rm(dir, { recursive: true, force: true });
       }
     });
+  });
+});
+
+// ── Iteration 1 integration: gradient fill routing ───────────────────────────
+
+describe("syncPenToCode — Iteration 1 integration", () => {
+  let dir: string;
+  let mapping: MappingConfig;
+  const settings: Settings = {
+    stateFile: "",
+    logLevel: "error",
+    maxBudgetUsd: 1,
+    mcpConfigPath: undefined,
+  };
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "ps-iter1-"));
+    await mkdir(join(dir, "code"), { recursive: true });
+    await writeFile(join(dir, "code", "styles.css"), `:root { --color-primary: 102 126 234; }\n`);
+    mapping = {
+      id: "iter1",
+      penFile: join(dir, "design.pen"),
+      codeDir: join(dir, "code"),
+      codeGlobs: ["**/*.css"],
+      direction: "both",
+      styleFiles: ["styles.css"],
+    };
+
+    mockedRunClaude.mockResolvedValue({
+      success: true,
+      stdout: "no changes",
+      stderr: "",
+      exitCode: 0,
+      tokenUsage: { input: 10, output: 5, cacheCreation: 0, cacheRead: 0 },
+    });
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+    vi.clearAllMocks();
+  });
+
+  it("gradient fill change routes to Claude, not hex fast-path (no 'could not convert hex' error)", async () => {
+    const oldDoc = {
+      ...realisticPenDoc,
+      children: [{ id: "hero", name: "Hero", type: "frame", fill: gradientFill, children: [] }],
+    };
+    const newDoc = {
+      ...realisticPenDoc,
+      children: [{ id: "hero", name: "Hero", type: "frame", fill: gradientFillAlt, children: [] }],
+    };
+
+    // Previous state from old gradient snapshot
+    await writeFile(mapping.penFile, serializeDoc(oldDoc as typeof realisticPenDoc));
+    const { snapshotPenFile } = await import("../pen-snapshot.js");
+    const oldSnap = snapshotPenFile(mapping.penFile, serializeDoc(oldDoc as typeof realisticPenDoc))!;
+
+    const previousState: MappingState = {
+      mappingId: "iter1",
+      penHash: "old",
+      lastSyncTimestamp: Date.now() - 1000,
+      lastSyncDirection: "pen-to-code",
+      codeHashes: {},
+      penSnapshot: oldSnap,
+    };
+
+    await writeFile(mapping.penFile, serializeDoc(newDoc as typeof realisticPenDoc));
+
+    const result = await syncPenToCode(mapping, settings, previousState);
+
+    // Should not error on "could not convert hex"
+    if (!result.success && result.error) {
+      expect(result.error).not.toContain("Could not convert hex");
+      expect(result.error).not.toContain("could not convert hex");
+    }
+    // Claude must have been called (gradient routes to Claude, not fast-path)
+    expect(mockedRunClaude).toHaveBeenCalled();
+  });
+
+  it("scalar hex fill change still uses fast-path (Claude NOT called)", async () => {
+    const penWithHex = JSON.stringify({
+      children: [{ id: "btn", name: "Button", type: "frame", fill: "#667eea", children: [] }],
+    });
+    const penWithHexNew = JSON.stringify({
+      children: [{ id: "btn", name: "Button", type: "frame", fill: "#ff0000", children: [] }],
+    });
+
+    await writeFile(mapping.penFile, penWithHex);
+    const { snapshotPenFile } = await import("../pen-snapshot.js");
+    const oldSnap = snapshotPenFile(mapping.penFile, penWithHex)!;
+
+    const previousState: MappingState = {
+      mappingId: "iter1",
+      penHash: "old",
+      lastSyncTimestamp: Date.now() - 1000,
+      lastSyncDirection: "pen-to-code",
+      codeHashes: {},
+      penSnapshot: oldSnap,
+    };
+
+    // Write CSS with the old hex as RGB
+    await writeFile(join(dir, "code", "styles.css"), `:root { --color-primary: 102 126 234; }\n`);
+    await writeFile(mapping.penFile, penWithHexNew);
+
+    await syncPenToCode(mapping, settings, previousState);
+
+    // Hex fast-path handles fill changes — Claude should NOT be called for fill-only
+    expect(mockedRunClaude).not.toHaveBeenCalled();
   });
 });
