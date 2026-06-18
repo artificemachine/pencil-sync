@@ -13,9 +13,11 @@ describe("setup — smoke", () => {
 });
 
 /** Build a mock WizardIO that returns answers in sequence. */
-function makeIO(answers: string[]): WizardIO {
+function makeIO(answers: string[]): WizardIO & { _printed: string[]; _steps: string[]; _detected: string[] } {
   let idx = 0;
   const printed: string[] = [];
+  const steps: string[] = [];
+  const detected: string[] = [];
   return {
     async ask(_question: string, defaultVal?: string): Promise<string> {
       if (idx >= answers.length) return defaultVal ?? "";
@@ -25,8 +27,23 @@ function makeIO(answers: string[]): WizardIO {
     print(msg: string) {
       printed.push(msg);
     },
+    printSection(title: string) {
+      printed.push(`── ${title} ──`);
+    },
+    printStep(n: number, total: number, label: string) {
+      const s = `[${n}/${total}] ${label}`;
+      steps.push(s);
+      printed.push(s);
+    },
+    printDetected(label: string, value: string) {
+      const s = `${label}: ${value} (auto-detected)`;
+      detected.push(s);
+      printed.push(s);
+    },
     _printed: printed,
-  } as WizardIO & { _printed: string[] };
+    _steps: steps,
+    _detected: detected,
+  } as WizardIO & { _printed: string[]; _steps: string[]; _detected: string[] };
 }
 
 /** Scaffold a minimal temp project directory. */
@@ -475,6 +492,84 @@ describe("setup — non-interactive mode", () => {
       nonInteractive: true,
       defaults: { penFile: "./design.pen", codeDir: "./src" },
     });
+    const raw = await readFile(join(dir, "pencil-sync.config.json"), "utf-8");
+    expect(() => JSON.parse(raw)).not.toThrow();
+  });
+});
+
+// ─── Iteration 1: WizardIO display primitives ────────────────────────────────
+
+describe("setup — WizardIO display primitives", () => {
+  it("smoke: makeIO returns an object with all 5 WizardIO methods", () => {
+    const io = makeIO([]);
+    expect(typeof io.ask).toBe("function");
+    expect(typeof io.print).toBe("function");
+    expect(typeof io.printSection).toBe("function");
+    expect(typeof io.printStep).toBe("function");
+    expect(typeof io.printDetected).toBe("function");
+  });
+
+  it("printSection formats header with title in output", () => {
+    const io = makeIO([]);
+    io.printSection("Project Setup");
+    expect(io._printed.some((s) => s.includes("Project Setup"))).toBe(true);
+  });
+
+  it("printStep includes [N/total] counter in output", () => {
+    const io = makeIO([]);
+    io.printStep(1, 7, "Project");
+    expect(io._steps[0]).toBe("[1/7] Project");
+    expect(io._printed.some((s) => s.includes("[1/7]"))).toBe(true);
+  });
+
+  it("printDetected marks value as auto-detected in output", () => {
+    const io = makeIO([]);
+    io.printDetected("framework", "nextjs");
+    expect(io._detected[0]).toContain("nextjs");
+    expect(io._printed.some((s) => s.includes("(auto-detected)"))).toBe(true);
+  });
+
+  it("contract: WizardIO interface has all 5 required methods", () => {
+    const io = makeIO([]) as WizardIO;
+    expect(typeof io.ask).toBe("function");
+    expect(typeof io.print).toBe("function");
+    expect(typeof (io as unknown as { printSection: unknown }).printSection).toBe("function");
+    expect(typeof (io as unknown as { printStep: unknown }).printStep).toBe("function");
+    expect(typeof (io as unknown as { printDetected: unknown }).printDetected).toBe("function");
+  });
+});
+
+describe("setup — step counter", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "pencil-setup-steps-"));
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "design.pen"), "{}");
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("emits [1/7] step counter before first wizard question", async () => {
+    const { runSetup } = await import("../setup.js");
+    const io = makeIO(["myapp", "1", "./src", "", "", "", ""]);
+    await runSetup(io, { cwd: dir });
+    expect(io._steps.some((s) => s.startsWith("[1/7]"))).toBe(true);
+  });
+
+  it("emits [7/7] step counter before budget question", async () => {
+    const { runSetup } = await import("../setup.js");
+    const io = makeIO(["myapp", "1", "./src", "", "", "", ""]);
+    await runSetup(io, { cwd: dir });
+    expect(io._steps.some((s) => s.startsWith("[7/7]"))).toBe(true);
+  });
+
+  it("regression: existing 7-answer happy path still writes config after step counter added", async () => {
+    const { runSetup } = await import("../setup.js");
+    const io = makeIO(["myapp", "1", "./src", "react", "css", "both", "0.5"]);
+    await runSetup(io, { cwd: dir });
     const raw = await readFile(join(dir, "pencil-sync.config.json"), "utf-8");
     expect(() => JSON.parse(raw)).not.toThrow();
   });

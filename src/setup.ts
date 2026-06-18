@@ -1,12 +1,27 @@
 import { writeFile, mkdir, access } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { createInterface } from "node:readline";
+import chalk from "chalk";
 import { detectFramework, detectStyling, findPenFiles } from "./config.js";
 import { log } from "./logger.js";
+
+const STEP_COUNT = 7;
+const STEP_LABELS = [
+  "Project name",
+  "Design file",
+  "Code directory",
+  "Framework",
+  "Styling",
+  "Sync direction",
+  "Budget",
+];
 
 export interface WizardIO {
   ask(question: string, defaultVal?: string): Promise<string>;
   print(msg: string): void;
+  printSection(title: string): void;
+  printStep(n: number, total: number, label: string): void;
+  printDetected(label: string, value: string): void;
 }
 
 export interface SetupDefaults {
@@ -39,6 +54,15 @@ export function createReadlineIO(): WizardIO {
     },
     print(msg) {
       console.log(msg);
+    },
+    printSection(title: string) {
+      console.log(chalk.bold(`\n── ${title} ──`));
+    },
+    printStep(n: number, total: number, label: string) {
+      console.log(`${chalk.cyan(`[${n}/${total}]`)} ${chalk.dim(label)}`);
+    },
+    printDetected(label: string, value: string) {
+      console.log(`  ${label}: ${chalk.yellow(value)} ${chalk.dim("(auto-detected)")}`);
     },
   };
 }
@@ -93,6 +117,9 @@ function createNonInteractiveIO(defaults: SetupDefaults): WizardIO {
       return defaultVal ?? "";
     },
     print(_msg: string) { /* silent in non-interactive */ },
+    printSection(_title: string) { /* silent in non-interactive */ },
+    printStep(_n: number, _total: number, _label: string) { /* silent in non-interactive */ },
+    printDetected(_label: string, _value: string) { /* silent in non-interactive */ },
   };
 }
 
@@ -134,38 +161,47 @@ export async function runSetup(io?: WizardIO, opts: SetupOptions = {}): Promise<
     }
   }
 
-  wizard.print("\nWelcome to pencil-sync setup!\n");
+  wizard.printSection("Welcome to pencil-sync setup!");
 
   // Auto-detect framework and styling
   const detectedFramework = await detectFramework(cwd);
   const detectedStyling = await detectStyling(cwd);
 
   // Step 1 — project name
+  wizard.printStep(1, STEP_COUNT, STEP_LABELS[0]);
   const defaultName = basename(cwd);
   const projectName = await wizard.ask("Project name", defaultName);
 
   // Step 2 — pen file
+  wizard.printStep(2, STEP_COUNT, STEP_LABELS[1]);
   const penFile = await promptPenFile(wizard, cwd);
 
   // Step 3 — code directory
+  wizard.printStep(3, STEP_COUNT, STEP_LABELS[2]);
   const codeDir = await wizard.ask("Code directory", "./src");
 
   // Step 4 — framework
+  wizard.printStep(4, STEP_COUNT, STEP_LABELS[3]);
+  wizard.printDetected("Framework", detectedFramework);
   const framework = await wizard.ask(
     `Framework (nextjs/react/vue/svelte/astro/unknown)`,
     detectedFramework,
   );
 
   // Step 5 — styling
+  wizard.printStep(5, STEP_COUNT, STEP_LABELS[4]);
+  wizard.printDetected("Styling", detectedStyling);
   const styling = await wizard.ask(
     `Styling system (tailwind/css-modules/styled-components/css/unknown)`,
     detectedStyling,
   );
 
   // Step 6 — sync direction
+  wizard.printStep(6, STEP_COUNT, STEP_LABELS[5]);
   const direction = await wizard.ask("Sync direction (both/pen-to-code/code-to-pen)", "both");
 
   // Step 7 — budget
+  wizard.printStep(7, STEP_COUNT, STEP_LABELS[6]);
   const budgetStr = await wizard.ask("Max budget in USD", "0.5");
   const maxBudgetUsd = parseFloat(budgetStr) || 0.5;
 

@@ -96,3 +96,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-18: chore(release): bump to v0.3.0 (.pencil-sync/ dir, doctor, auto-detection, setup wizard)
 - 2026-06-18: feat(mcp): pencil_record_sync now writes last-run.json alongside state
 - 2026-06-18: feat(setup): add --non-interactive flag with --pen-file/--code-dir/--framework/--styling/--direction/--budget
+- 2026-06-18: feat(setup): add step counter, section headers, and colored auto-detected values
