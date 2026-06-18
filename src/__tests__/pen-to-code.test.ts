@@ -583,4 +583,73 @@ describe("syncPenToCode", () => {
       expect(result.filesChanged.length).toBeGreaterThan(0);
     });
   });
+
+  describe("executor injection", () => {
+    it("uses the injected executor for non-color changes (unit)", async () => {
+      await writeFile(
+        join(dir, "design.pen"),
+        makePenJson([{ id: "t1", name: "title", type: "text", content: "new title" }]),
+      );
+      const previousState = makePreviousState(
+        makeSnapshot("t1", { name: "title", type: "text", content: "old title" }),
+      );
+
+      const fakeExecutor = {
+        run: vi.fn().mockResolvedValue({ success: true, stdout: "done", stderr: "", exitCode: 0 }),
+      };
+      mockedRunClaude.mockResolvedValue({ success: true, stdout: "done", stderr: "", exitCode: 0 });
+
+      // RED: syncPenToCode does not accept an executor param yet — fakeExecutor.run is never called
+      await syncPenToCode(mapping, settings, previousState, false, fakeExecutor as any);
+
+      expect(fakeExecutor.run).toHaveBeenCalledOnce();
+      expect(mockedRunClaude).not.toHaveBeenCalled();
+    });
+
+    it("SyncResult shape is identical with injected executor (integration)", async () => {
+      await writeFile(
+        join(dir, "design.pen"),
+        makePenJson([{ id: "t1", name: "title", type: "text", content: "new title" }]),
+      );
+      const previousState = makePreviousState(
+        makeSnapshot("t1", { name: "title", type: "text", content: "old title" }),
+      );
+
+      const fakeExecutor = {
+        run: vi.fn().mockResolvedValue({
+          success: true, stdout: "done", stderr: "", exitCode: 0,
+          tokenUsage: { input: 200, output: 40 },
+        }),
+      };
+
+      const result = await syncPenToCode(mapping, settings, previousState, false, fakeExecutor as any);
+
+      expect(result.success).toBe(true);
+      expect(result.direction).toBe("pen-to-code");
+      expect(result.mappingId).toBe("test");
+      expect(result.tokenUsage).toEqual({ input: 200, output: 40 });
+    });
+
+    it("chaos: injected executor failure produces identical SyncResult error shape", async () => {
+      await writeFile(
+        join(dir, "design.pen"),
+        makePenJson([{ id: "t1", name: "title", type: "text", content: "new title" }]),
+      );
+      const previousState = makePreviousState(
+        makeSnapshot("t1", { name: "title", type: "text", content: "old title" }),
+      );
+
+      const fakeExecutor = {
+        run: vi.fn().mockResolvedValue({
+          success: false, stdout: "", stderr: "MCP server unavailable",
+          exitCode: 1, mcpError: "server_unavailable" as const,
+        }),
+      };
+
+      const result = await syncPenToCode(mapping, settings, previousState, false, fakeExecutor as any);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Claude CLI failed");
+    });
+  });
 });

@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { log } from "./logger.js";
-import { runClaude } from "./claude-runner.js";
+import { type Executor, localClaudeExecutor } from "./executor.js";
 import { buildPenToCodePrompt } from "./prompt-builder.js";
 import { snapshotPenFile, diffPenSnapshots } from "./pen-snapshot.js";
 import { getCssStyleFile, validatePathWithin } from "./utils.js";
@@ -140,13 +140,14 @@ async function executeFillFastPath(
   return applyFillChanges(mapping, fillDiffs);
 }
 
-/** Delegate non-fill changes to Claude CLI. Returns changed files or a partial-failure result. */
+/** Delegate non-fill changes to the executor. Returns changed files or a partial-failure result. */
 async function executeClaudeSync(
   mapping: MappingConfig,
   settings: Settings,
   otherDiffs: PenDiffEntry[],
   priorFilesChanged: string[],
   penSnapshot: PenNodeSnapshot,
+  executor: Executor = localClaudeExecutor,
 ): Promise<SyncResult> {
   log.info(`Sending ${otherDiffs.length} non-color change(s) to Claude CLI`);
 
@@ -154,7 +155,7 @@ async function executeClaudeSync(
   const prompt = await buildPenToCodePrompt(mapping, undefined, otherDiffs);
   log.debug(`Prompt length: ${prompt.length} chars`);
 
-  const result = await runClaude({
+  const result = await executor.run({
     prompt,
     model: settings.model,
     cwd: mapping.codeDir,
@@ -199,6 +200,7 @@ export async function syncPenToCode(
   settings: Settings,
   previousState?: MappingState,
   dryRun = false,
+  executor: Executor = localClaudeExecutor,
 ): Promise<SyncResult> {
   log.sync("pen-to-code", mapping.id, "Starting design → code sync");
 
@@ -296,7 +298,7 @@ export async function syncPenToCode(
   }
 
   if (otherDiffs.length > 0) {
-    return executeClaudeSync(mapping, settings, otherDiffs, fillFilesChanged, snapshot);
+    return executeClaudeSync(mapping, settings, otherDiffs, fillFilesChanged, snapshot, executor);
   }
 
   const uniqueFiles = [...new Set(fillFilesChanged)];

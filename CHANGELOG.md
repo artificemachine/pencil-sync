@@ -80,3 +80,5 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-18: docs(plan): add iteration plan for Executor interface refactor (Option A)
 
 - 2026-06-18: refactor(executor): add Executor interface and LocalClaudeExecutor wrapping runClaude
+
+- 2026-06-18: refactor(sync): route pen-to-code and code-to-pen through injected Executor

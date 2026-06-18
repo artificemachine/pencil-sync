@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { log } from "./logger.js";
-import { runClaude } from "./claude-runner.js";
+import { type Executor, localClaudeExecutor } from "./executor.js";
 import { buildCodeToPenPrompt } from "./prompt-builder.js";
 import { hashFile } from "./state-store.js";
 import type { PenReader } from "./pen-reader.js";
@@ -16,6 +16,7 @@ export async function syncCodeToPen(
   changedFiles: string[],
   penReader: PenReader = defaultPenReader,
   dryRun = false,
+  executor: Executor = localClaudeExecutor,
 ): Promise<SyncResult> {
   log.sync("code-to-pen", mapping.id, `Starting code → design sync (${changedFiles.length} files changed)`);
 
@@ -46,7 +47,7 @@ export async function syncCodeToPen(
   const prompt = await buildCodeToPenPrompt(mapping, changedFiles);
   log.debug(`Prompt length: ${prompt.length} chars`);
 
-  const result = await runClaude({
+  const result = await executor.run({
     prompt,
     model: settings.model,
     cwd: mapping.codeDir,
