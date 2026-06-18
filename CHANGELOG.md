@@ -106,3 +106,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-18: chore(release): bump to v0.4.0 (setup wizard back-nav + TUI dashboard with ink/react)
 - 2026-06-18: fix(tui): wire tui command to load config and pass to startTui; load states from StateStore
 - 2026-06-18: chore(release): bump to v0.4.1 (tui wiring fix)
+- 2026-06-18: docs(pen-format): correct false ".pen is encrypted" guardrail — .pen is plaintext JSON (resolves P1-A); add docs/PEN-FORMAT.md schema reference

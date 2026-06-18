@@ -12,7 +12,7 @@ Bidirectional sync between Pencil.dev `.pen` design files and frontend code via 
 ## Guardrails
 - Never edit `.env`, credentials, or secrets.
 - Never push directly to `main` — always use a feature branch and PR.
-- `.pen` file contents are encrypted — always use Pencil MCP tools, never `Read`/`Grep` on `.pen` files.
+- `.pen` files are plaintext JSON (Pencil's documented developer format) — safe to `Read`/`Grep`/`JSON.parse` directly. Prefer the Pencil MCP for structured *writes* (code-to-pen), not because of encryption. See `docs/PEN-FORMAT.md`.
 - Run `npm run build && npm test` before any commit.
 - Installation decoupling: once installed (e.g., via `npm link` or to `~/.local/bin`), the binary must NEVER depend on the local repository path for execution or data. All paths must be relative to the install root or use standard system config paths (`~/.config`).
 
@@ -71,7 +71,7 @@ prompts/               Prompt templates (pen-to-code, code-to-pen, conflict-reso
 
 ## Conventions
 
-- `.pen` file contents are encrypted — always use Pencil MCP tools, never `Read`/`Grep`
+- `.pen` files are plaintext JSON — read/parse directly; see `docs/PEN-FORMAT.md` for the schema
 - All imports use `.js` extensions (ESM resolution)
 - Config merging uses `safeMerge()` to prevent prototype pollution
 - Budget tracking via token parsing from Claude CLI `--verbose` stderr

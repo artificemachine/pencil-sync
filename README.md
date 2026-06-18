@@ -277,7 +277,7 @@ With MCP enabled
           mcp__pencil__batch_design    — insert / update / delete nodes
           mcp__pencil__set_variables   — update design variables / themes
           mcp__pencil__get_screenshot  — visual validation
-    └── .pen contents accessed via encrypted MCP protocol (not raw file read)
+    └── .pen nodes accessed via structured MCP calls (preferred for writes; not raw file read)
 ```
 
 ### Setup
@@ -345,9 +345,9 @@ pencil-sync status -c ./pencil-sync.config.json
 
 MCP is most impactful for **code-to-pen** and **auto-merge** — the directions that need to write back to the design file.
 
-### Security note
+### Read/write access
 
-`.pen` files are encrypted. The Pencil MCP server is the only supported way to read or write their contents. If `mcpConfigPath` is not set, pencil-sync falls back to treating the `.pen` file as a JSON snapshot (works for design-to-code; code-to-pen writes may be unreliable).
+`.pen` files are plaintext JSON — Pencil's [documented developer format](https://docs.pencil.dev/for-developers/the-pen-format), safe to read and parse directly. pencil-sync reads them with `readFile` + `JSON.parse` by default (see `docs/PEN-FORMAT.md` for the schema). The Pencil MCP server is **optional** and preferred for **structured writes** (code-to-pen) and screenshot validation, because node-level MCP calls are more reliable than regenerating the whole file. If `mcpConfigPath` is not set, code-to-pen writes fall back to whole-file JSON edits, which can be less precise.
 
 ---
 
