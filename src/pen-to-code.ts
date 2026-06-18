@@ -131,6 +131,13 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** True for scalar hex (#rrggbb, #rgb) or rgb(...) strings — fast-path eligible. */
+function isScalarColorValue(val: string | number): boolean {
+  if (typeof val === "number") return false;
+  const s = val.trim();
+  return /^#[0-9a-fA-F]{3,8}$/.test(s) || /^rgb\(/.test(s);
+}
+
 /** Apply fill changes directly and return the full FillChangeResult. */
 async function executeFillFastPath(
   mapping: MappingConfig,
@@ -251,8 +258,10 @@ export async function syncPenToCode(
     log.info(`  ${d.nodeName}.${d.prop}: ${d.oldValue} → ${d.newValue}`);
   }
 
-  const fillDiffs = diffs.filter((d) => d.prop === "fill");
-  const otherDiffs = diffs.filter((d) => d.prop !== "fill");
+  // Fast-path only handles scalar hex/rgb fills. Complex fills (gradients,
+  // images, fill arrays stored as canonical JSON strings) route to Claude.
+  const fillDiffs = diffs.filter((d) => d.prop === "fill" && isScalarColorValue(d.newValue) && isScalarColorValue(d.oldValue));
+  const otherDiffs = diffs.filter((d) => d.prop !== "fill" || !isScalarColorValue(d.newValue) || !isScalarColorValue(d.oldValue));
 
   if (dryRun) {
     const wouldChange: string[] = [];
