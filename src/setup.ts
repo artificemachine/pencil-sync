@@ -1,17 +1,44 @@
 import { writeFile, mkdir, access } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { createInterface } from "node:readline";
+import chalk from "chalk";
 import { detectFramework, detectStyling, findPenFiles } from "./config.js";
 import { log } from "./logger.js";
+
+const STEP_COUNT = 7;
+const STEP_LABELS = [
+  "Project name",
+  "Design file",
+  "Code directory",
+  "Framework",
+  "Styling",
+  "Sync direction",
+  "Budget",
+];
 
 export interface WizardIO {
   ask(question: string, defaultVal?: string): Promise<string>;
   print(msg: string): void;
+  printSection(title: string): void;
+  printStep(n: number, total: number, label: string): void;
+  printDetected(label: string, value: string): void;
+}
+
+export interface SetupDefaults {
+  projectName?: string;
+  penFile?: string;
+  codeDir?: string;
+  framework?: string;
+  styling?: string;
+  direction?: string;
+  budget?: string;
 }
 
 export interface SetupOptions {
   cwd?: string;
   isTTY?: boolean;
+  nonInteractive?: boolean;
+  defaults?: SetupDefaults;
 }
 
 export function createReadlineIO(): WizardIO {
@@ -28,25 +55,39 @@ export function createReadlineIO(): WizardIO {
     print(msg) {
       console.log(msg);
     },
+    printSection(title: string) {
+      console.log(chalk.bold(`\n── ${title} ──`));
+    },
+    printStep(n: number, total: number, label: string) {
+      console.log(`${chalk.cyan(`[${n}/${total}]`)} ${chalk.dim(label)}`);
+    },
+    printDetected(label: string, value: string) {
+      console.log(`  ${label}: ${chalk.yellow(value)} ${chalk.dim("(auto-detected)")}`);
+    },
   };
 }
 
-async function promptPenFile(io: WizardIO, searchDir: string): Promise<string> {
+async function promptPenFileWithBack(
+  io: WizardIO,
+  searchDir: string,
+  prevValue?: string,
+): Promise<string | null> {
   const found = await findPenFiles(searchDir);
   if (found.length === 0) {
-    return io.ask("Path to your .pen file (manual entry)", "./design.pen");
+    const ans = await io.ask("Path to your .pen file (manual entry)", prevValue ?? "./design.pen");
+    return ans.toLowerCase() === "back" ? null : ans;
   }
   io.print("\nFound .pen files:");
   found.forEach((p, i) => io.print(`  [${i + 1}] ${p}`));
   io.print(`  [m] Enter path manually`);
   const choice = await io.ask("Select a .pen file", "1");
+  if (choice.toLowerCase() === "back") return null;
   if (choice === "m") {
-    return io.ask("Path to your .pen file", found[0]);
+    const manual = await io.ask("Path to your .pen file", prevValue ?? found[0]);
+    return manual.toLowerCase() === "back" ? null : manual;
   }
   const idx = parseInt(choice, 10) - 1;
-  if (idx >= 0 && idx < found.length) {
-    return found[idx];
-  }
+  if (idx >= 0 && idx < found.length) return found[idx];
   return found[0];
 }
 
@@ -59,9 +100,62 @@ async function configExists(cwd: string): Promise<boolean> {
   }
 }
 
+function createNonInteractiveIO(defaults: SetupDefaults): WizardIO {
+  const answerMap: Record<string, string | undefined> = {
+    "project name": defaults.projectName,
+    "pen file": defaults.penFile,
+    "pen": defaults.penFile,
+    "code directory": defaults.codeDir,
+    "framework": defaults.framework,
+    "styling": defaults.styling,
+    "direction": defaults.direction,
+    "budget": defaults.budget,
+  };
+
+  return {
+    async ask(question: string, defaultVal?: string): Promise<string> {
+      const lq = question.toLowerCase();
+      for (const [key, val] of Object.entries(answerMap)) {
+        if (lq.includes(key) && val !== undefined) return val;
+      }
+      return defaultVal ?? "";
+    },
+    print(_msg: string) { /* silent in non-interactive */ },
+    printSection(_title: string) { /* silent in non-interactive */ },
+    printStep(_n: number, _total: number, _label: string) { /* silent in non-interactive */ },
+    printDetected(_label: string, _value: string) { /* silent in non-interactive */ },
+  };
+}
+
+function printSummary(io: WizardIO, collected: Record<string, string>): void {
+  io.printSection("Summary");
+  for (const [key, value] of Object.entries(collected)) {
+    io.print(`  ${key}: ${value}`);
+  }
+}
+
 export async function runSetup(io?: WizardIO, opts: SetupOptions = {}): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const isTTY = opts.isTTY ?? process.stdin.isTTY;
+  const nonInteractive = opts.nonInteractive ?? false;
+  const defaults = opts.defaults ?? {};
+
+  // Non-interactive mode: validate required fields, then run with preset answers
+  if (nonInteractive) {
+    if (!defaults.penFile || !defaults.codeDir) {
+      const msg = "Error: --non-interactive requires --pen-file and --code-dir to be specified.";
+      (io ?? { print: console.log }).print(msg);
+      return;
+    }
+    const niIO = createNonInteractiveIO(defaults);
+    return runSetup(niIO, {
+      cwd,
+      isTTY: true,
+      nonInteractive: false,
+      defaults,
+    });
+  }
+
   const wizard = io ?? createReadlineIO();
 
   if (!isTTY && !io) {
@@ -78,40 +172,146 @@ export async function runSetup(io?: WizardIO, opts: SetupOptions = {}): Promise<
     }
   }
 
-  wizard.print("\nWelcome to pencil-sync setup!\n");
+  wizard.printSection("Welcome to pencil-sync setup!");
 
   // Auto-detect framework and styling
   const detectedFramework = await detectFramework(cwd);
   const detectedStyling = await detectStyling(cwd);
 
-  // Step 1 — project name
-  const defaultName = basename(cwd);
-  const projectName = await wizard.ask("Project name", defaultName);
+  // Initialize collected from opts.defaults (supports restart with prior answers as defaults)
+  const collected: Record<string, string> = {
+    projectName: defaults.projectName ?? "",
+    penFile: defaults.penFile ?? "",
+    codeDir: defaults.codeDir ?? "",
+    framework: defaults.framework ?? "",
+    styling: defaults.styling ?? "",
+    direction: defaults.direction ?? "",
+    budget: defaults.budget ?? "",
+  };
 
-  // Step 2 — pen file
-  const penFile = await promptPenFile(wizard, cwd);
+  // Step descriptors — each run() returns null to signal "go back"
+  const steps: Array<{
+    key: string;
+    label: string;
+    run: (io: WizardIO, c: Record<string, string>) => Promise<string | null>;
+  }> = [
+    {
+      key: "projectName",
+      label: STEP_LABELS[0],
+      run: async (io, c) => {
+        const ans = await io.ask("Project name", c.projectName || basename(cwd));
+        return ans.toLowerCase() === "back" ? null : ans;
+      },
+    },
+    {
+      key: "penFile",
+      label: STEP_LABELS[1],
+      run: async (io, c) => promptPenFileWithBack(io, cwd, c.penFile || undefined),
+    },
+    {
+      key: "codeDir",
+      label: STEP_LABELS[2],
+      run: async (io, c) => {
+        const ans = await io.ask("Code directory", c.codeDir || "./src");
+        return ans.toLowerCase() === "back" ? null : ans;
+      },
+    },
+    {
+      key: "framework",
+      label: STEP_LABELS[3],
+      run: async (io, c) => {
+        io.printDetected("Framework", detectedFramework);
+        const ans = await io.ask(
+          "Framework (nextjs/react/vue/svelte/astro/unknown)",
+          c.framework || detectedFramework,
+        );
+        return ans.toLowerCase() === "back" ? null : ans;
+      },
+    },
+    {
+      key: "styling",
+      label: STEP_LABELS[4],
+      run: async (io, c) => {
+        io.printDetected("Styling", detectedStyling);
+        const ans = await io.ask(
+          "Styling system (tailwind/css-modules/styled-components/css/unknown)",
+          c.styling || detectedStyling,
+        );
+        return ans.toLowerCase() === "back" ? null : ans;
+      },
+    },
+    {
+      key: "direction",
+      label: STEP_LABELS[5],
+      run: async (io, c) => {
+        const ans = await io.ask("Sync direction (both/pen-to-code/code-to-pen)", c.direction || "both");
+        return ans.toLowerCase() === "back" ? null : ans;
+      },
+    },
+    {
+      key: "budget",
+      label: STEP_LABELS[6],
+      run: async (io, c) => {
+        const ans = await io.ask("Max budget in USD", c.budget || "0.5");
+        return ans.toLowerCase() === "back" ? null : ans;
+      },
+    },
+  ];
 
-  // Step 3 — code directory
-  const codeDir = await wizard.ask("Code directory", "./src");
+  // Step loop with back navigation + confirmation
+  let stepIndex = 0;
+  let confirmed = false;
 
-  // Step 4 — framework
-  const framework = await wizard.ask(
-    `Framework (nextjs/react/vue/svelte/astro/unknown)`,
-    detectedFramework,
-  );
+  while (!confirmed) {
+    // Run each step, supporting "back"
+    while (stepIndex < steps.length) {
+      const step = steps[stepIndex];
+      wizard.printStep(stepIndex + 1, STEP_COUNT, step.label);
+      const result = await step.run(wizard, collected);
+      if (result === null) {
+        if (stepIndex === 0) {
+          wizard.print("Already at step 1.");
+          // Stay at step 0 — re-run it in the next iteration
+        } else {
+          stepIndex--;
+        }
+      } else {
+        collected[step.key] = result;
+        stepIndex++;
+      }
+    }
 
-  // Step 5 — styling
-  const styling = await wizard.ask(
-    `Styling system (tailwind/css-modules/styled-components/css/unknown)`,
-    detectedStyling,
-  );
+    // Confirmation summary
+    printSummary(wizard, collected);
+    const confirm = await wizard.ask("Confirm? (y/n/restart)", "y");
+    if (confirm.toLowerCase() === "n") {
+      wizard.print("Setup aborted. No files written.");
+      return;
+    }
+    if (confirm.toLowerCase() === "restart") {
+      return runSetup(wizard, {
+        cwd,
+        isTTY: true,
+        nonInteractive: false,
+        defaults: collected as SetupDefaults,
+      });
+    }
+    if (confirm.toLowerCase() === "back") {
+      stepIndex = steps.length - 1; // go back to step 7 (budget)
+      // continue outer while loop
+    } else {
+      confirmed = true;
+    }
+  }
 
-  // Step 6 — sync direction
-  const direction = await wizard.ask("Sync direction (both/pen-to-code/code-to-pen)", "both");
-
-  // Step 7 — budget
-  const budgetStr = await wizard.ask("Max budget in USD", "0.5");
-  const maxBudgetUsd = parseFloat(budgetStr) || 0.5;
+  // Extract final values
+  const projectName = collected.projectName;
+  const penFile = collected.penFile;
+  const codeDir = collected.codeDir;
+  const framework = collected.framework;
+  const styling = collected.styling;
+  const direction = collected.direction;
+  const maxBudgetUsd = parseFloat(collected.budget) || 0.5;
 
   // Write config
   const config = {

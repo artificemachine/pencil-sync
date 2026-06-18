@@ -69,6 +69,14 @@ export interface TokenUsage {
   output: number;
 }
 
+export type TuiSyncEvent = {
+  type: "sync" | "error" | "warning" | "conflict";
+  mappingId: string;
+  message: string;
+  timestamp: number;
+  success?: boolean;
+};
+
 export type McpErrorType =
   | "malformed_response"
   | "server_unavailable"

@@ -581,3 +581,78 @@ describe("SyncEngine — last-run.json integration", () => {
     eng.shutdown();
   });
 });
+
+describe("SyncEngine — onEvent callback", () => {
+  let dir: string;
+  let mapping: MappingConfig;
+  let config: PencilSyncConfig;
+  let engine: InstanceType<typeof SyncEngine>;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "pencil-onevent-"));
+    await mkdir(join(dir, "code"));
+    await writeFile(join(dir, "code", "app.tsx"), "content");
+    await writeFile(join(dir, "design.pen"), JSON.stringify({ children: [] }));
+
+    mapping = {
+      id: "m1",
+      penFile: join(dir, "design.pen"),
+      codeDir: join(dir, "code"),
+      codeGlobs: ["**/*.tsx"],
+      direction: "pen-to-code",
+    };
+
+    config = {
+      version: 1,
+      mappings: [mapping],
+      settings: {
+        debounceMs: 0,
+        model: "claude-sonnet-4-6",
+        maxBudgetUsd: 10,
+        conflictStrategy: "prompt",
+        stateFile: join(dir, ".pencil-sync", "state.json"),
+        logLevel: "error",
+      },
+    };
+
+    engine = new SyncEngine(config);
+    await engine.initialize();
+    mockedRunClaude.mockResolvedValue({ success: true, stdout: "Done", stderr: "", exitCode: 0, tokenUsage: { input: 100, output: 50 } });
+  });
+
+  afterEach(async () => {
+    engine.shutdown();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("handler is called with success event after syncMapping completes", async () => {
+    const events: Array<{ type: string; success?: boolean; mappingId: string }> = [];
+    engine.onEvent((ev) => events.push(ev));
+
+    await engine.syncMapping(mapping, "pen-changed");
+
+    expect(events.length).toBeGreaterThan(0);
+    const ev = events[0];
+    expect(ev.mappingId).toBe("m1");
+    expect(ev.success).toBe(true);
+  });
+
+  it("handler is called with error event when sync fails", async () => {
+    mockedRunClaude.mockResolvedValueOnce({ success: false, stdout: "", stderr: "fail", exitCode: 1, tokenUsage: { input: 0, output: 0 } });
+    const events: Array<{ type: string; success?: boolean; mappingId: string }> = [];
+    engine.onEvent((ev) => events.push(ev));
+
+    await engine.syncMapping(mapping, "pen-changed");
+
+    expect(events.length).toBeGreaterThan(0);
+    const ev = events[0];
+    expect(ev.mappingId).toBe("m1");
+    expect(ev.success).toBe(false);
+  });
+
+  it("chaos: handler that throws does not crash syncMapping", async () => {
+    engine.onEvent(() => { throw new Error("handler boom"); });
+
+    await expect(engine.syncMapping(mapping, "pen-changed")).resolves.toBeDefined();
+  });
+});

@@ -94,3 +94,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-18: feat(detect): add detectStyling() css-modules/css detection and findPenFiles() helper
 - 2026-06-18: feat(setup): add interactive pencil-sync setup wizard replacing init command
 - 2026-06-18: chore(release): bump to v0.3.0 (.pencil-sync/ dir, doctor, auto-detection, setup wizard)
+- 2026-06-18: feat(mcp): pencil_record_sync now writes last-run.json alongside state
+- 2026-06-18: feat(setup): add --non-interactive flag with --pen-file/--code-dir/--framework/--styling/--direction/--budget
+- 2026-06-18: feat(setup): add step counter, section headers, and colored auto-detected values
+- 2026-06-18: feat(setup): add confirmation summary screen before writing config
+- 2026-06-18: feat(setup): add back navigation to setup wizard (step-array loop, "back" returns to previous step)
+- 2026-06-18: feat(tui): ink/react deps, JSX config, logger TUI hook, tui command skeleton
+- 2026-06-18: feat(tui): static MappingPanel component with mapping state snapshot
+- 2026-06-18: feat(tui): EventFeed component + SyncEngine.onEvent callback for live updates
+- 2026-06-18: feat(tui): keybinds (s/d/q), BudgetMeter, and full pencil-sync tui command wired
+- 2026-06-18: chore(release): bump to v0.4.0 (setup wizard back-nav + TUI dashboard with ink/react)

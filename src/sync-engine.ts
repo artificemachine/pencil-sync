@@ -19,6 +19,7 @@ import type {
   SyncResult,
   ConflictInfo,
   TokenUsage,
+  TuiSyncEvent,
 } from "./types.js";
 
 const ASK_USER_TIMEOUT_MS = 30_000;
@@ -35,6 +36,20 @@ export class SyncEngine {
   private penReader: PenReader;
   private executor: Executor;
   private cumulativeSpendUsd = 0;
+  private eventHandler: ((ev: TuiSyncEvent) => void) | null = null;
+
+  onEvent(handler: ((ev: TuiSyncEvent) => void) | null): void {
+    this.eventHandler = handler;
+  }
+
+  private emitEvent(ev: TuiSyncEvent): void {
+    if (this.eventHandler === null) return;
+    try {
+      this.eventHandler(ev);
+    } catch {
+      // handler threw — ignore to avoid crashing sync
+    }
+  }
 
   constructor(private config: PencilSyncConfig, penReader?: PenReader, executor?: Executor) {
     this.stateStore = new StateStore(config.settings.stateFile);
@@ -123,6 +138,13 @@ export class SyncEngine {
           this.lockManager.setLastSyncDirection(mapping.id, result.direction);
         }
         releaseWithGrace = result.success && !result.skipped;
+        this.emitEvent({
+          type: result.success ? "conflict" : "error",
+          mappingId: mapping.id,
+          message: result.error ?? (result.success ? `Conflict resolved (${result.direction})` : "Conflict resolution failed"),
+          timestamp: Date.now(),
+          success: result.success,
+        });
         return result;
       }
 
@@ -162,6 +184,14 @@ export class SyncEngine {
         this.lockManager.setLastSyncDirection(mapping.id, result.direction);
       }
       releaseWithGrace = shouldPersist;
+
+      this.emitEvent({
+        type: result.success ? "sync" : "error",
+        mappingId: mapping.id,
+        message: result.error ?? (result.success ? `Synced (${result.direction})` : "Sync failed"),
+        timestamp: Date.now(),
+        success: result.success,
+      });
 
       return result;
     } finally {
