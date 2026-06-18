@@ -6,7 +6,8 @@ import { StateStore } from "./state-store.js";
 import { detectConflict, isConflict } from "./conflict-detector.js";
 import { syncPenToCode } from "./pen-to-code.js";
 import { syncCodeToPen } from "./code-to-pen.js";
-import { runClaude, estimateCost, estimateInputTokens, MODEL_PRICING } from "./claude-runner.js";
+import { estimateCost, estimateInputTokens, MODEL_PRICING } from "./claude-runner.js";
+import { type Executor, localClaudeExecutor } from "./executor.js";
 import type { PenReader } from "./pen-reader.js";
 import { JsonPenReader } from "./pen-reader.js";
 import { buildConflictPrompt, buildCodeToPenPrompt, buildPenToCodePrompt } from "./prompt-builder.js";
@@ -32,12 +33,14 @@ export class SyncEngine {
   private lockManager: LockManager;
   private stateStore: StateStore;
   private penReader: PenReader;
+  private executor: Executor;
   private cumulativeSpendUsd = 0;
 
-  constructor(private config: PencilSyncConfig, penReader?: PenReader) {
+  constructor(private config: PencilSyncConfig, penReader?: PenReader, executor?: Executor) {
     this.stateStore = new StateStore(config.settings.stateFile);
     this.lockManager = new LockManager(config.settings.debounceMs);
     this.penReader = penReader ?? new JsonPenReader();
+    this.executor = executor ?? localClaudeExecutor;
   }
 
   async initialize(): Promise<void> {
@@ -192,9 +195,9 @@ export class SyncEngine {
     }
 
     if (direction === "pen-to-code") {
-      return syncPenToCode(mapping, this.config.settings, previousState, dryRun);
+      return syncPenToCode(mapping, this.config.settings, previousState, dryRun, this.executor);
     } else {
-      return syncCodeToPen(mapping, this.config.settings, conflict.changedCodeFiles, this.penReader, dryRun);
+      return syncCodeToPen(mapping, this.config.settings, conflict.changedCodeFiles, this.penReader, dryRun, this.executor);
     }
   }
 
@@ -286,7 +289,7 @@ export class SyncEngine {
       };
     }
 
-    const result = await runClaude({
+    const result = await this.executor.run({
       prompt,
       model: this.config.settings.model,
       cwd: mapping.codeDir,
