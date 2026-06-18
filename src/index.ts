@@ -223,7 +223,8 @@ program
   .command("tui")
   .description("Launch the live TUI dashboard")
   .action(async () => {
-    await startTui();
+    const config = await initConfig(program.opts());
+    await startTui(config);
   });
 
 function installShutdownHandlers(): void {
