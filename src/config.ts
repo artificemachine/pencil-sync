@@ -177,7 +177,11 @@ async function resolveMapping(
   configDir: string,
 ): Promise<MappingConfig> {
   const resolved = { ...mapping };
-  resolved.penFile = validatePathWithin(configDir, mapping.penFile);
+  // penFile is a read-only input — it may legitimately live outside the
+  // project directory (e.g. a Pencil workspace folder). Resolve to absolute
+  // but do not confine it. Only write targets (codeDir, stateFile) need the
+  // traversal guard since pencil-sync modifies files under those paths.
+  resolved.penFile = resolve(configDir, mapping.penFile);
   resolved.codeDir = validatePathWithin(configDir, mapping.codeDir);
 
   const projectRoot = await findProjectRoot(resolved.codeDir, configDir);

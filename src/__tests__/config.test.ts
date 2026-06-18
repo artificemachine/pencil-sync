@@ -382,19 +382,23 @@ describe("loadConfig", () => {
     expect(config.settings.debounceMs).toBe(2000);
   });
 
-  it("prevents path traversal in penFile", async () => {
+  it("allows penFile outside configDir (read-only input, not a write target)", async () => {
+    // penFile is read-only — it may legitimately live anywhere (e.g. a Pencil
+    // workspace folder outside the project). Only write targets (codeDir,
+    // stateFile) are confined by the traversal guard.
     const configPath = join(dir, "pencil-sync.config.json");
     await writeFile(configPath, JSON.stringify({
       mappings: [{
-        id: "escape",
-        penFile: "../../../../../../etc/passwd",
+        id: "external",
+        penFile: "../../../../../../etc/hosts",
         codeDir: "code",
         codeGlobs: ["**/*.tsx"],
         direction: "both",
       }],
     }));
 
-    await expect(loadConfig(configPath)).rejects.toThrow(/path traversal detected/i);
+    const config = await loadConfig(configPath);
+    expect(config.mappings[0].penFile).toMatch(/etc\/hosts$/);
   });
 
   it("prevents path traversal in codeDir", async () => {
@@ -430,18 +434,21 @@ describe("loadConfig", () => {
     await expect(loadConfig(configPath)).rejects.toThrow(/path traversal detected/i);
   });
 
-  it("rejects penFile escaping config dir via the cross-platform guard", async () => {
+  it("resolves absolute penFile outside configDir without error", async () => {
+    // Absolute paths outside the config directory must also be accepted
+    // for penFile — the file is read-only, not a write target.
     const configPath = join(dir, "pencil-sync.config.json");
     await writeFile(configPath, JSON.stringify({
       mappings: [{
-        id: "escape",
-        penFile: "../../etc/passwd",
+        id: "absolute",
+        penFile: "/tmp/test.pen",
         codeDir: "code",
         codeGlobs: ["**/*.tsx"],
         direction: "both",
       }],
     }));
-    await expect(loadConfig(configPath)).rejects.toThrow(/resolves outside of/i);
+    const config = await loadConfig(configPath);
+    expect(config.mappings[0].penFile).toBe("/tmp/test.pen");
   });
 
   it("rejects a sibling path sharing a prefix with config dir", async () => {
