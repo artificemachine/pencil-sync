@@ -1,7 +1,7 @@
 # pencil-sync
 
 ![Node.js >= 20](https://img.shields.io/badge/node-%3E%3D20-green)
-![Tests: 312 passing](https://img.shields.io/badge/tests-312%20passing-brightgreen)
+![Tests: 471 passing](https://img.shields.io/badge/tests-471%20passing-brightgreen)
 ![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 Bidirectional sync between [Pencil.dev](https://pencil.dev) designs and frontend code, powered by [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
@@ -24,7 +24,10 @@ npm link        # makes pencil-sync available globally on PATH
 ## Quick Start
 
 ```bash
-# Generate a config file
+# Interactive setup wizard (auto-detects framework, styling, and .pen files)
+pencil-sync setup
+
+# Or generate a minimal config manually (alias for setup)
 pencil-sync init
 
 # Edit pencil-sync.config.json to point to your .pen file and code directory
@@ -110,7 +113,9 @@ pencil-sync watch -c ./pencil-sync.config.json -m my-app
 
 | Command | Description |
 |---------|-------------|
-| `pencil-sync init` | Create a starter config file in the current directory |
+| `pencil-sync setup` | Interactive wizard: auto-detect framework/styling, write config, validate |
+| `pencil-sync init` | Alias for `setup` |
+| `pencil-sync doctor` | Run preflight checks: Claude CLI, config, pen file, code dir, globs, budget |
 | `pencil-sync sync` | Run a one-time sync for all (or a specific) mapping |
 | `pencil-sync watch` | Start auto-sync file watcher |
 | `pencil-sync status` | Show sync state for all mappings |
