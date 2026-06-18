@@ -99,3 +99,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-18: feat(setup): add step counter, section headers, and colored auto-detected values
 - 2026-06-18: feat(setup): add confirmation summary screen before writing config
 - 2026-06-18: feat(setup): add back navigation to setup wizard (step-array loop, "back" returns to previous step)
+- 2026-06-18: feat(tui): ink/react deps, JSX config, logger TUI hook, tui command skeleton

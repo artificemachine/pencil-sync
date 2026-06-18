@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
 import { runDoctor } from "./doctor.js";
 import { runSetup } from "./setup.js";
+import { startTui } from "./tui/index.js";
 import { setLogLevel, log } from "./logger.js";
 import { SyncEngine } from "./sync-engine.js";
 import { Watcher } from "./watcher.js";
@@ -216,6 +217,13 @@ program
 
     engine.shutdown();
     process.exit(0);
+  });
+
+program
+  .command("tui")
+  .description("Launch the live TUI dashboard")
+  .action(async () => {
+    await startTui();
   });
 
 function installShutdownHandlers(): void {
