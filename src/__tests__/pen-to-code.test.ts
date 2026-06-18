@@ -13,7 +13,7 @@ vi.mock("../prompt-builder.js", () => ({
   buildPenToCodePrompt: vi.fn().mockResolvedValue("test prompt"),
 }));
 
-const { syncPenToCode } = await import("../pen-to-code.js");
+const { syncPenToCode, applyFillChanges } = await import("../pen-to-code.js");
 const { runClaude } = await import("../claude-runner.js");
 
 const mockedRunClaude = vi.mocked(runClaude);
@@ -581,6 +581,106 @@ describe("syncPenToCode", () => {
       expect(result.success).toBe(true);
       expect(result.warnings).toBeUndefined();
       expect(result.filesChanged.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("executor injection", () => {
+    it("uses the injected executor for non-color changes (unit)", async () => {
+      await writeFile(
+        join(dir, "design.pen"),
+        makePenJson([{ id: "t1", name: "title", type: "text", content: "new title" }]),
+      );
+      const previousState = makePreviousState(
+        makeSnapshot("t1", { name: "title", type: "text", content: "old title" }),
+      );
+
+      const fakeExecutor = {
+        run: vi.fn().mockResolvedValue({ success: true, stdout: "done", stderr: "", exitCode: 0 }),
+      };
+      mockedRunClaude.mockResolvedValue({ success: true, stdout: "done", stderr: "", exitCode: 0 });
+
+      // RED: syncPenToCode does not accept an executor param yet — fakeExecutor.run is never called
+      await syncPenToCode(mapping, settings, previousState, false, fakeExecutor as any);
+
+      expect(fakeExecutor.run).toHaveBeenCalledOnce();
+      expect(mockedRunClaude).not.toHaveBeenCalled();
+    });
+
+    it("SyncResult shape is identical with injected executor (integration)", async () => {
+      await writeFile(
+        join(dir, "design.pen"),
+        makePenJson([{ id: "t1", name: "title", type: "text", content: "new title" }]),
+      );
+      const previousState = makePreviousState(
+        makeSnapshot("t1", { name: "title", type: "text", content: "old title" }),
+      );
+
+      const fakeExecutor = {
+        run: vi.fn().mockResolvedValue({
+          success: true, stdout: "done", stderr: "", exitCode: 0,
+          tokenUsage: { input: 200, output: 40 },
+        }),
+      };
+
+      const result = await syncPenToCode(mapping, settings, previousState, false, fakeExecutor as any);
+
+      expect(result.success).toBe(true);
+      expect(result.direction).toBe("pen-to-code");
+      expect(result.mappingId).toBe("test");
+      expect(result.tokenUsage).toEqual({ input: 200, output: 40 });
+    });
+
+    it("chaos: injected executor failure produces identical SyncResult error shape", async () => {
+      await writeFile(
+        join(dir, "design.pen"),
+        makePenJson([{ id: "t1", name: "title", type: "text", content: "new title" }]),
+      );
+      const previousState = makePreviousState(
+        makeSnapshot("t1", { name: "title", type: "text", content: "old title" }),
+      );
+
+      const fakeExecutor = {
+        run: vi.fn().mockResolvedValue({
+          success: false, stdout: "", stderr: "MCP server unavailable",
+          exitCode: 1, mcpError: "server_unavailable" as const,
+        }),
+      };
+
+      const result = await syncPenToCode(mapping, settings, previousState, false, fakeExecutor as any);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Claude CLI failed");
+    });
+  });
+
+  describe("regression — applyFillChanges export backward compatibility", () => {
+    it("applyFillChanges is exported and returns FillChangeResult shape", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "fill-export-compat-"));
+      try {
+        await mkdir(join(dir, "code"), { recursive: true });
+        const cssPath = join(dir, "code", "styles.css");
+        await writeFile(cssPath, "--color-primary: 34 72 70;\n");
+
+        const mapping: MappingConfig = {
+          id: "test",
+          penFile: join(dir, "design.pen"),
+          codeDir: join(dir, "code"),
+          codeGlobs: ["**/*.css"],
+          direction: "both",
+          styleFiles: ["styles.css"],
+        };
+
+        const result = await applyFillChanges(mapping, [
+          { nodeId: "n1", nodeName: "btn", prop: "fill", oldValue: "#224846", newValue: "#ffffff" },
+        ]);
+
+        expect(result).toHaveProperty("filesChanged");
+        expect(result).toHaveProperty("errors");
+        expect(Array.isArray(result.filesChanged)).toBe(true);
+        expect(Array.isArray(result.errors)).toBe(true);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
     });
   });
 });

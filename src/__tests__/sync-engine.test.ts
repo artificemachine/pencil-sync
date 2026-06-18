@@ -424,4 +424,107 @@ describe("SyncEngine", () => {
       }
     });
   });
+
+  describe("executor injection", () => {
+    it("propagates its executor to pen-to-code direction (unit)", async () => {
+      const fakeExecutor = {
+        run: vi.fn().mockResolvedValue({
+          success: true, stdout: "done", stderr: "", exitCode: 0,
+          tokenUsage: { input: 100, output: 20 },
+        }),
+      };
+
+      // RED: SyncEngine doesn't accept an executor yet — fakeExecutor.run will not be called
+      const injectedEngine = new SyncEngine(config, undefined, fakeExecutor as any);
+      await injectedEngine.initialize();
+
+      await injectedEngine.syncMapping(mapping, "pen-changed");
+
+      expect(fakeExecutor.run).toHaveBeenCalled();
+      expect(mockedRunClaude).not.toHaveBeenCalled();
+
+      injectedEngine.shutdown();
+    });
+
+    it("uses injected executor for auto-merge (unit + state machine: conflict detected → auto-merge → resolved)", async () => {
+      const fakeExecutor = {
+        run: vi.fn().mockResolvedValue({
+          success: true, stdout: "merged", stderr: "", exitCode: 0,
+          tokenUsage: { input: 100, output: 50 },
+        }),
+      };
+
+      config.settings.conflictStrategy = "auto-merge";
+      // RED: SyncEngine doesn't accept an executor yet — autoMergeConflict calls runClaude
+      const autoEngine = new SyncEngine(config, undefined, fakeExecutor as any);
+      await autoEngine.initialize();
+
+      // Initialize state via first sync
+      await autoEngine.syncMapping(mapping, "pen-changed");
+      autoEngine.getLockManager().forceRelease(mapping.id);
+
+      // Change both files to create conflict
+      await writeFile(join(dir, "design.pen"), JSON.stringify({ children: [{ id: "changed" }] }));
+      await writeFile(join(dir, "code", "app.tsx"), "modified code");
+
+      // Reset counts before the assertion window (auto-merge call only)
+      fakeExecutor.run.mockClear();
+      mockedRunClaude.mockClear();
+
+      const result = await autoEngine.syncMapping(mapping, "pen-changed");
+
+      expect(fakeExecutor.run).toHaveBeenCalled();
+      expect(mockedRunClaude).not.toHaveBeenCalled();
+      // State machine: conflict resolved successfully
+      expect(result.success).toBe(true);
+      expect(result.direction).toBe("both");
+
+      autoEngine.shutdown();
+      config.settings.conflictStrategy = "prompt"; // restore
+    });
+
+    it("default executor (no injection): SyncEngine still uses runClaude (regression)", async () => {
+      // Uses default LocalClaudeExecutor — runClaude must still be called
+      const result = await engine.syncMapping(mapping, "pen-changed");
+      expect(result.success).toBe(true);
+      expect(mockedRunClaude).toHaveBeenCalled();
+    });
+
+    it("chaos: injected executor failure in auto-merge preserves error path", async () => {
+      const failingExecutor = {
+        run: vi.fn().mockResolvedValue({
+          success: false, stdout: "", stderr: "API overloaded", exitCode: 1,
+        }),
+      };
+
+      config.settings.conflictStrategy = "auto-merge";
+      const autoEngine = new SyncEngine(config, undefined, failingExecutor as any);
+      await autoEngine.initialize();
+
+      await autoEngine.syncMapping(mapping, "pen-changed");
+      autoEngine.getLockManager().forceRelease(mapping.id);
+
+      await writeFile(join(dir, "design.pen"), JSON.stringify({ children: [{ id: "changed" }] }));
+      await writeFile(join(dir, "code", "app.tsx"), "modified code");
+
+      failingExecutor.run.mockClear();
+      mockedRunClaude.mockClear();
+
+      const result = await autoEngine.syncMapping(mapping, "pen-changed");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Auto-merge failed");
+
+      autoEngine.shutdown();
+      config.settings.conflictStrategy = "prompt"; // restore
+    });
+
+    it("SyncEngine(config) with default executor completes full sync flow (E2E smoke)", async () => {
+      // No executor injected — proves the default wiring works end to end
+      const result = await engine.syncMapping(mapping, "pen-changed");
+      expect(result.success).toBe(true);
+      expect(result.direction).toBe("pen-to-code");
+      expect(result.mappingId).toBe("test");
+    });
+  });
 });

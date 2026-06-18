@@ -186,4 +186,61 @@ describe("syncCodeToPen", () => {
     expect(result.penSnapshot!["btn1"]).toBeDefined();
     expect(result.penSnapshot!["btn1"].fill).toBe("#ff0000");
   });
+
+  describe("executor injection", () => {
+    it("uses the injected executor (unit)", async () => {
+      const fakeExecutor = {
+        run: vi.fn().mockResolvedValue({ success: true, stdout: "done", stderr: "", exitCode: 0 }),
+      };
+      mockedRunClaude.mockResolvedValue({ success: true, stdout: "done", stderr: "", exitCode: 0 });
+
+      // RED: syncCodeToPen does not accept an executor param yet — fakeExecutor.run is never called
+      await syncCodeToPen(mapping, settings, ["app.tsx"], undefined, false, fakeExecutor as any);
+
+      expect(fakeExecutor.run).toHaveBeenCalledOnce();
+      expect(mockedRunClaude).not.toHaveBeenCalled();
+    });
+
+    it("forwards MCP options to the executor when mcpConfigPath is set (contract)", async () => {
+      const mcpSettings = { ...settings, mcpConfigPath: "/path/to/mcp.json" };
+      const fakeExecutor = {
+        run: vi.fn().mockResolvedValue({ success: true, stdout: "done", stderr: "", exitCode: 0 }),
+      };
+
+      await syncCodeToPen(mapping, mcpSettings, ["app.tsx"], undefined, false, fakeExecutor as any);
+
+      const call = fakeExecutor.run.mock.calls[0][0];
+      expect(call.allowedTools).toContain("mcp__pencil__batch_get");
+      expect(call.mcpConfigPath).toBe("/path/to/mcp.json");
+    });
+
+    it("SyncResult shape is identical with injected executor (integration)", async () => {
+      const fakeExecutor = {
+        run: vi.fn().mockResolvedValue({
+          success: true, stdout: "done", stderr: "", exitCode: 0,
+          tokenUsage: { input: 300, output: 60 },
+        }),
+      };
+
+      const result = await syncCodeToPen(mapping, settings, ["app.tsx"], undefined, false, fakeExecutor as any);
+
+      expect(result.success).toBe(true);
+      expect(result.direction).toBe("code-to-pen");
+      expect(result.mappingId).toBe("test");
+    });
+
+    it("chaos: executor failure produces identical SyncResult error shape", async () => {
+      const fakeExecutor = {
+        run: vi.fn().mockResolvedValue({
+          success: false, stdout: "", stderr: "server unavailable",
+          exitCode: 1, mcpError: "server_unavailable" as const,
+        }),
+      };
+
+      const result = await syncCodeToPen(mapping, settings, ["app.tsx"], undefined, false, fakeExecutor as any);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeTruthy();
+    });
+  });
 });

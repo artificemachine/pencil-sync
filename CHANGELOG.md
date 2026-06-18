@@ -77,3 +77,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-12: chore(tooling): measure coverage and enforce thresholds (v8 provider, lines≥81%)
 - 2026-06-12: chore(release): bump to v0.1.5 (fast-path fix, glob unification, ESLint, coverage)
 - 2026-06-12: chore: ignore .serena/, .hablatone, coverage/ in .gitignore
+- 2026-06-18: docs(plan): add iteration plan for Executor interface refactor (Option A)
+
+- 2026-06-18: refactor(executor): add Executor interface and LocalClaudeExecutor wrapping runClaude
+
+- 2026-06-18: refactor(sync): route pen-to-code and code-to-pen through injected Executor
+
+- 2026-06-18: refactor(sync): SyncEngine owns a single Executor and injects it into both directions
+- 2026-06-18: feat(mcp): route logger output to stderr in MCP mode
+- 2026-06-18: feat(mcp): add pencil-sync-mcp binary with MCP stdio server skeleton
+- 2026-06-18: feat(mcp): add pencil_get_config, pencil_diff_design, pencil_diff_code, pencil_detect_conflict tools
+- 2026-06-18: feat(mcp): add pencil_build_prompt, pencil_apply_fill_changes, pencil_record_sync tools
+- 2026-06-18: chore(release): bump version to 0.2.0 — MCP server feature (minor)

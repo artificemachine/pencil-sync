@@ -1,6 +1,6 @@
 {
   "name": "pencil-sync",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "description": "Bidirectional sync between .pen design files and frontend code via Claude CLI",
   "license": "Apache-2.0",
   "author": "pencil-sync contributors",
@@ -27,7 +27,8 @@
   ],
   "type": "module",
   "bin": {
-    "pencil-sync": "./dist/index.js"
+    "pencil-sync": "./dist/index.js",
+    "pencil-sync-mcp": "./dist/mcp-server.js"
   },
   "scripts": {
     "build": "tsc",
@@ -45,10 +46,12 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "chalk": "^5.3.0",
     "chokidar": "^4.0.3",
     "commander": "^13.1.0",
-    "ora": "^8.1.1"
+    "ora": "^8.1.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
