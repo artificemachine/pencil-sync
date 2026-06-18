@@ -9,9 +9,14 @@ const LEVELS: Record<LogLevel, number> = {
 };
 
 let currentLevel: LogLevel = "info";
+let mcpMode = false;
 
 export function setLogLevel(level: LogLevel): void {
   currentLevel = level;
+}
+
+export function setMcpMode(enabled: boolean): void {
+  mcpMode = enabled;
 }
 
 function shouldLog(level: LogLevel): boolean {
@@ -22,16 +27,25 @@ function timestamp(): string {
   return chalk.gray(new Date().toISOString().slice(11, 19));
 }
 
+function emit(formatted: string, ...args: unknown[]): void {
+  if (mcpMode) {
+    const extra = args.length ? " " + args.map(String).join(" ") : "";
+    process.stderr.write(formatted + extra + "\n");
+  } else {
+    console.log(formatted, ...args);
+  }
+}
+
 export const log = {
   debug(msg: string, ...args: unknown[]): void {
     if (shouldLog("debug")) {
-      console.log(`${timestamp()} ${chalk.gray("DBG")} ${msg}`, ...args);
+      emit(`${timestamp()} ${chalk.gray("DBG")} ${msg}`, ...args);
     }
   },
 
   info(msg: string, ...args: unknown[]): void {
     if (shouldLog("info")) {
-      console.log(`${timestamp()} ${chalk.blue("INF")} ${msg}`, ...args);
+      emit(`${timestamp()} ${chalk.blue("INF")} ${msg}`, ...args);
     }
   },
 
@@ -49,7 +63,7 @@ export const log = {
 
   success(msg: string, ...args: unknown[]): void {
     if (shouldLog("info")) {
-      console.log(`${timestamp()} ${chalk.green("OK ")} ${msg}`, ...args);
+      emit(`${timestamp()} ${chalk.green("OK ")} ${msg}`, ...args);
     }
   },
 
@@ -59,9 +73,7 @@ export const log = {
         direction === "pen-to-code"
           ? chalk.magenta(".pen → code")
           : chalk.cyan("code → .pen");
-      console.log(
-        `${timestamp()} ${arrow} ${chalk.dim(`[${mappingId}]`)} ${msg}`,
-      );
+      emit(`${timestamp()} ${arrow} ${chalk.dim(`[${mappingId}]`)} ${msg}`);
     }
   },
 };

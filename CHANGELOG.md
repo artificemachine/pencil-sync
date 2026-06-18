@@ -84,3 +84,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-18: refactor(sync): route pen-to-code and code-to-pen through injected Executor
 
 - 2026-06-18: refactor(sync): SyncEngine owns a single Executor and injects it into both directions
+- 2026-06-18: feat(mcp): route logger output to stderr in MCP mode
