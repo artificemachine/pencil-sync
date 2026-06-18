@@ -269,6 +269,84 @@ describe("snapshotPenFile — chaos", () => {
   });
 });
 
+// ── Iteration 2: design token tracking ───────────────────────────────────────
+
+describe("snapshotPenFile — smoke (token-bearing doc)", () => {
+  it("snapshot of token-bearing document includes a token entry", () => {
+    const raw = serializeDoc(realisticPenDoc);
+    const snapshot = snapshotPenFile("/tmp/realistic.pen", raw);
+    expect(snapshot).not.toBeNull();
+    const keys = Object.keys(snapshot!);
+    expect(keys.some((k) => k.startsWith("/"))).toBe(true);
+  });
+});
+
+describe("snapshotPenFile — design tokens (variables / themes)", () => {
+  function makeDocWithTokens(variables: Record<string, unknown>, themes?: Record<string, unknown>): string {
+    return JSON.stringify({ version: "2.13", variables, themes: themes ?? {}, children: [] });
+  }
+
+  it("variable value change produces a diff entry", () => {
+    const oldRaw = makeDocWithTokens({ "color-primary": "#667eea" });
+    const newRaw = makeDocWithTokens({ "color-primary": "#ff0000" });
+    const oldSnap = snapshotPenFile("/tmp/old.pen", oldRaw)!;
+    const newSnap = snapshotPenFile("/tmp/new.pen", newRaw)!;
+    const diffs = diffPenSnapshots(oldSnap, newSnap);
+    expect(diffs.length).toBeGreaterThanOrEqual(1);
+    const tokenDiff = diffs.find((d) => d.prop === "color-primary");
+    expect(tokenDiff).toBeDefined();
+  });
+
+  it("new token added produces a diff", () => {
+    const oldRaw = makeDocWithTokens({ "color-primary": "#667eea" });
+    const newRaw = makeDocWithTokens({ "color-primary": "#667eea", "color-accent": "#ff6b6b" });
+    const oldSnap = snapshotPenFile("/tmp/old.pen", oldRaw)!;
+    const newSnap = snapshotPenFile("/tmp/new.pen", newRaw)!;
+    const diffs = diffPenSnapshots(oldSnap, newSnap);
+    expect(diffs.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("no token change produces no diffs", () => {
+    const raw = makeDocWithTokens({ "color-primary": "#667eea", "spacing-base": "8px" });
+    const snap = snapshotPenFile("/tmp/test.pen", raw)!;
+    expect(diffPenSnapshots(snap, snap)).toHaveLength(0);
+  });
+
+  it("legacy snapshot without tokens produces no spurious diffs against token-less doc", () => {
+    const raw = JSON.stringify({ children: [{ id: "n1", name: "Box", type: "frame", fill: "#fff" }] });
+    const snap = snapshotPenFile("/tmp/test.pen", raw)!;
+    expect(diffPenSnapshots(snap, snap)).toHaveLength(0);
+  });
+});
+
+describe("snapshotPenFile — contract (token key collision prevention)", () => {
+  it("reserved token nodeId starting with '/' cannot collide with a real node id", () => {
+    const raw = JSON.stringify({
+      version: "2.13",
+      variables: { "color-primary": "#667eea" },
+      children: [{ id: "n1", name: "Box", type: "frame", fill: "#fff" }],
+    });
+    const snap = snapshotPenFile("/tmp/test.pen", raw)!;
+    const nodeKeys = Object.keys(snap).filter((k) => !k.startsWith("/"));
+    const tokenKeys = Object.keys(snap).filter((k) => k.startsWith("/"));
+    // Node ids cannot contain '/' per the Pencil spec
+    expect(nodeKeys.every((k) => !k.includes("/"))).toBe(true);
+    expect(tokenKeys.length).toBeGreaterThan(0);
+  });
+});
+
+describe("diffPenSnapshots — token regression", () => {
+  it("token-less documents produce identical output to pre-Iter2 behaviour", () => {
+    const raw = JSON.stringify({
+      children: [{ id: "btn1", name: "Button", type: "frame", fill: "#667eea" }],
+    });
+    const snap = snapshotPenFile("/tmp/test.pen", raw)!;
+    expect(diffPenSnapshots(snap, snap)).toHaveLength(0);
+    expect(snap["btn1"]).toBeDefined();
+    expect(snap["btn1"].fill).toBe("#667eea");
+  });
+});
+
 describe("snapshotPenFile — regression (scalar hex fills unchanged)", () => {
   it("scalar hex fill change still detected correctly", () => {
     const oldSnap = { btn1: { name: "submitBtn", type: "frame", fill: "#00ff00" } };

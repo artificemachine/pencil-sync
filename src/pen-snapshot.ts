@@ -54,15 +54,38 @@ export function snapshotPenFile(penFile: string, raw: string): PenNodeSnapshot |
   try {
     const pen = JSON.parse(raw);
     const snapshot: PenNodeSnapshot = {};
+
     for (const child of (pen.children ?? [])) {
       flattenPenNodes(child, snapshot);
     }
+
+    // Capture document-level design tokens under reserved keys prefixed with '/'.
+    // Node ids cannot contain '/' (Pencil spec), so no collision is possible.
+    if (pen.variables && typeof pen.variables === "object") {
+      snapshot["/variables"] = flattenTokens(pen.variables as Record<string, unknown>);
+    }
+    if (pen.themes && typeof pen.themes === "object") {
+      snapshot["/themes"] = flattenTokens(pen.themes as Record<string, unknown>);
+    }
+
     return snapshot;
   } catch (err) {
     log.error(`Failed to parse .pen file: ${err}`);
     return null;
   }
 }
+
+function flattenTokens(tokens: Record<string, unknown>): Record<string, string | number> {
+  const flat: Record<string, string | number> = {};
+  for (const [key, val] of Object.entries(tokens)) {
+    flat[key] = (typeof val === "string" || typeof val === "number")
+      ? val
+      : stableStringify(val);
+  }
+  return flat;
+}
+
+const TOKEN_KEYS = new Set(["/variables", "/themes"]);
 
 export function diffPenSnapshots(
   oldSnap: PenNodeSnapshot,
@@ -72,6 +95,23 @@ export function diffPenSnapshots(
 
   for (const [nodeId, newProps] of Object.entries(newSnap)) {
     const oldProps = oldSnap[nodeId];
+
+    if (TOKEN_KEYS.has(nodeId)) {
+      // Design token bucket — diff every key, not just TRACKED_PROPS
+      if (!oldProps) continue; // no previous token snapshot — skip
+      for (const [tokenKey, newVal] of Object.entries(newProps)) {
+        const oldVal = oldProps[tokenKey];
+        if (oldVal !== undefined && String(oldVal) !== String(newVal)) {
+          diffs.push({ nodeId, nodeName: nodeId, prop: tokenKey, oldValue: oldVal, newValue: newVal });
+        }
+        if (oldVal === undefined) {
+          // New token added — emit diff with empty old value
+          diffs.push({ nodeId, nodeName: nodeId, prop: tokenKey, oldValue: "", newValue: newVal });
+        }
+      }
+      continue;
+    }
+
     if (!oldProps) continue; // new node — skip for now
 
     for (const prop of TRACKED_PROPS) {
