@@ -97,3 +97,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-18: feat(mcp): pencil_record_sync now writes last-run.json alongside state
 - 2026-06-18: feat(setup): add --non-interactive flag with --pen-file/--code-dir/--framework/--styling/--direction/--budget
 - 2026-06-18: feat(setup): add step counter, section headers, and colored auto-detected values
+- 2026-06-18: feat(setup): add confirmation summary screen before writing config

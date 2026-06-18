@@ -123,6 +123,13 @@ function createNonInteractiveIO(defaults: SetupDefaults): WizardIO {
   };
 }
 
+function printSummary(io: WizardIO, collected: Record<string, string>): void {
+  io.printSection("Summary");
+  for (const [key, value] of Object.entries(collected)) {
+    io.print(`  ${key}: ${value}`);
+  }
+}
+
 export async function runSetup(io?: WizardIO, opts: SetupOptions = {}): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const isTTY = opts.isTTY ?? process.stdin.isTTY;
@@ -204,6 +211,22 @@ export async function runSetup(io?: WizardIO, opts: SetupOptions = {}): Promise<
   wizard.printStep(7, STEP_COUNT, STEP_LABELS[6]);
   const budgetStr = await wizard.ask("Max budget in USD", "0.5");
   const maxBudgetUsd = parseFloat(budgetStr) || 0.5;
+
+  // Confirmation summary screen
+  printSummary(wizard, { projectName, penFile, codeDir, framework, styling, direction, budget: budgetStr });
+  const confirm = await wizard.ask("Confirm? (y/n/restart)", "y");
+  if (confirm.toLowerCase() === "n") {
+    wizard.print("Setup aborted. No files written.");
+    return;
+  }
+  if (confirm.toLowerCase() === "restart") {
+    return runSetup(wizard, {
+      cwd,
+      isTTY: true,
+      nonInteractive: false,
+      defaults: { projectName, penFile, codeDir, framework, styling, direction, budget: budgetStr },
+    });
+  }
 
   // Write config
   const config = {

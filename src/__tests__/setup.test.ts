@@ -497,6 +497,99 @@ describe("setup — non-interactive mode", () => {
   });
 });
 
+// ─── Iteration 2: Confirmation summary screen ────────────────────────────────
+
+describe("setup — confirmation summary screen", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "pencil-setup-confirm-"));
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "design.pen"), "{}");
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("smoke: runSetup with 'n' at summary exits cleanly without writing config", async () => {
+    const { runSetup } = await import("../setup.js");
+    const io = makeIO(["myapp", "1", "./src", "", "", "", "", "n"]);
+    await runSetup(io, { cwd: dir });
+    let configExists = false;
+    try { await access(join(dir, "pencil-sync.config.json")); configExists = true; } catch {}
+    expect(configExists).toBe(false);
+  });
+
+  it("shows penFile and codeDir values in printed output before writing", async () => {
+    const { runSetup } = await import("../setup.js");
+    const io = makeIO(["myapp", "1", "./src", "", "", "", "", "y"]);
+    await runSetup(io, { cwd: dir });
+    const allOutput = io._printed.join("\n");
+    expect(allOutput).toMatch(/\.pen/);
+    expect(allOutput).toMatch(/src/);
+  });
+
+  it("aborts without writing config when user answers 'n' at confirmation", async () => {
+    const { runSetup } = await import("../setup.js");
+    const io = makeIO(["myapp", "1", "./src", "react", "css", "both", "0.5", "n"]);
+    await runSetup(io, { cwd: dir });
+    let configExists = false;
+    try { await access(join(dir, "pencil-sync.config.json")); configExists = true; } catch {}
+    expect(configExists).toBe(false);
+  });
+
+  it("writes config when user answers 'y' at confirmation", async () => {
+    const { runSetup } = await import("../setup.js");
+    const io = makeIO(["myapp", "1", "./src", "react", "css", "both", "0.5", "y"]);
+    await runSetup(io, { cwd: dir });
+    const raw = await readFile(join(dir, "pencil-sync.config.json"), "utf-8");
+    expect(JSON.parse(raw).mappings[0].framework).toBe("react");
+  });
+
+  it("state machine: loops back to step 1 when user answers 'restart' at confirmation", async () => {
+    const { runSetup } = await import("../setup.js");
+    // First pass: answer everything, then restart; second pass: answer with different name, confirm y
+    const io = makeIO(["myapp", "1", "./src", "", "", "", "", "restart", "newapp", "1", "./src", "", "", "", "", "y"]);
+    await runSetup(io, { cwd: dir });
+    const config = JSON.parse(await readFile(join(dir, "pencil-sync.config.json"), "utf-8"));
+    expect(config.mappings[0].id).toBe("newapp");
+  });
+
+  it("state machine: collecting -> confirming -> aborted", async () => {
+    const { runSetup } = await import("../setup.js");
+    const io = makeIO(["myapp", "1", "./src", "", "", "", "", "n"]);
+    await runSetup(io, { cwd: dir });
+    expect(io._printed.some((s) => s.toLowerCase().includes("abort"))).toBe(true);
+  });
+
+  it("state machine: collecting -> confirming -> writing", async () => {
+    const { runSetup } = await import("../setup.js");
+    const io = makeIO(["myapp", "1", "./src", "", "", "", "", "y"]);
+    await runSetup(io, { cwd: dir });
+    await expect(access(join(dir, "pencil-sync.config.json"))).resolves.toBeUndefined();
+  });
+
+  it("regression: non-interactive mode skips the summary screen", async () => {
+    const { runSetup } = await import("../setup.js");
+    await runSetup(undefined, {
+      cwd: dir,
+      nonInteractive: true,
+      defaults: { penFile: "./design.pen", codeDir: "./src" },
+    });
+    const raw = await readFile(join(dir, "pencil-sync.config.json"), "utf-8");
+    expect(() => JSON.parse(raw)).not.toThrow();
+  });
+
+  it("chaos: empty string at confirmation defaults to 'y' and writes config", async () => {
+    const { runSetup } = await import("../setup.js");
+    // empty string returns defaultVal which should be "y"
+    const io = makeIO(["myapp", "1", "./src", "", "", "", "", ""]);
+    await runSetup(io, { cwd: dir });
+    await expect(access(join(dir, "pencil-sync.config.json"))).resolves.toBeUndefined();
+  });
+});
+
 // ─── Iteration 1: WizardIO display primitives ────────────────────────────────
 
 describe("setup — WizardIO display primitives", () => {
