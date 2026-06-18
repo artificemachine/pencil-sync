@@ -141,8 +141,26 @@ program
   .command("setup")
   .alias("init")
   .description("Interactive wizard to set up pencil-sync for a project")
-  .action(async () => {
-    await runSetup(undefined, { cwd: process.cwd() });
+  .option("--non-interactive", "Run without prompts (requires --pen-file and --code-dir)")
+  .option("--pen-file <path>", "Path to the .pen file (non-interactive)")
+  .option("--code-dir <path>", "Path to the code directory (non-interactive)")
+  .option("--framework <name>", "Framework override (nextjs/react/vue/svelte/astro/unknown)")
+  .option("--styling <name>", "Styling system override (tailwind/css-modules/styled-components/css/unknown)")
+  .option("--direction <dir>", "Sync direction (both/pen-to-code/code-to-pen)")
+  .option("--budget <usd>", "Max budget in USD")
+  .action(async (opts) => {
+    await runSetup(undefined, {
+      cwd: process.cwd(),
+      nonInteractive: !!opts.nonInteractive,
+      defaults: {
+        penFile: opts.penFile,
+        codeDir: opts.codeDir,
+        framework: opts.framework,
+        styling: opts.styling,
+        direction: opts.direction,
+        budget: opts.budget,
+      },
+    });
   });
 
 program

@@ -12,7 +12,7 @@ import { buildPenToCodePrompt, buildCodeToPenPrompt } from "./prompt-builder.js"
 import { applyFillChanges } from "./pen-to-code.js";
 import { readFile } from "node:fs/promises";
 import { extractErrorMessage } from "./utils.js";
-import type { PenDiffEntry, SyncDirection } from "./types.js";
+import type { PenDiffEntry, SyncDirection, SyncResult } from "./types.js";
 
 const SERVER_NAME = "pencil-sync";
 const SERVER_VERSION = "0.2.0";
@@ -182,6 +182,13 @@ export function createMcpServer(): McpServer {
       try {
         const { mapping, store } = await loadConfigAndState(configPath, mappingId);
         await store.updateMappingState(mapping, direction as SyncDirection);
+        const lastRun: SyncResult = {
+          success: true,
+          direction: direction as SyncDirection,
+          mappingId,
+          filesChanged: filesChanged as string[],
+        };
+        await store.writeLastRun(lastRun);
         return ok({ ok: true, mappingId, direction, filesChanged });
       } catch (e) {
         return err(extractErrorMessage(e));

@@ -573,6 +573,52 @@ describe("mcp-server", () => {
       });
       expect(result.content[0].text).toMatch(/error|not found/i);
     });
+
+    it("writes last-run.json after successful pencil_record_sync call", async () => {
+      const { access: fsAccess, readFile: rf } = await import("node:fs/promises");
+      const cfg = makeConfig(dir);
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+
+      await callTool("pencil_record_sync", {
+        configPath,
+        mappingId: "test-mapping",
+        direction: "pen-to-code",
+        filesChanged: ["src/App.tsx"],
+      });
+
+      // stateFile is <dir>/.state.json so last-run.json lands next to it at <dir>/last-run.json
+      const lastRunPath = join(dir, "last-run.json");
+      await expect(fsAccess(lastRunPath)).resolves.toBeUndefined();
+      const raw = await rf(lastRunPath, "utf-8");
+      const lastRun = JSON.parse(raw);
+      expect(lastRun.success).toBe(true);
+      expect(lastRun.direction).toBe("pen-to-code");
+      expect(lastRun.mappingId).toBe("test-mapping");
+      expect(Array.isArray(lastRun.filesChanged)).toBe(true);
+    });
+
+    it("last-run.json shape is valid SyncResult", async () => {
+      const { readFile: rf } = await import("node:fs/promises");
+      const cfg = makeConfig(dir);
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+
+      await callTool("pencil_record_sync", {
+        configPath,
+        mappingId: "test-mapping",
+        direction: "code-to-pen",
+        filesChanged: ["src/Button.tsx", "src/Button.css"],
+      });
+
+      const raw = await rf(join(dir, "last-run.json"), "utf-8");
+      const lr = JSON.parse(raw);
+      expect(typeof lr.success).toBe("boolean");
+      expect(typeof lr.direction).toBe("string");
+      expect(typeof lr.mappingId).toBe("string");
+      expect(Array.isArray(lr.filesChanged)).toBe(true);
+      expect(lr.filesChanged).toContain("src/Button.tsx");
+    });
   });
 
   describe("contract — all 7 tools return valid MCP shape", () => {

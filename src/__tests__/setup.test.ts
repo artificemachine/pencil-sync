@@ -383,3 +383,99 @@ describe("setup — regression", () => {
     expect(typeof runSetup).toBe("function");
   });
 });
+
+describe("setup — non-interactive mode", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "pencil-setup-ni-"));
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "design.pen"), "{}");
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("writes config from defaults without prompting when nonInteractive=true", async () => {
+    const { runSetup } = await import("../setup.js");
+    await runSetup(undefined, {
+      cwd: dir,
+      nonInteractive: true,
+      defaults: {
+        projectName: "ci-app",
+        penFile: "./design.pen",
+        codeDir: "./src",
+        framework: "react",
+        styling: "css",
+        direction: "both",
+        budget: "1.0",
+      },
+    });
+    const config = JSON.parse(await readFile(join(dir, "pencil-sync.config.json"), "utf-8"));
+    expect(config.mappings[0].penFile).toBe("./design.pen");
+    expect(config.mappings[0].codeDir).toBe("./src");
+    expect(config.mappings[0].framework).toBe("react");
+    expect(config.mappings[0].styling).toBe("css");
+    expect(config.settings.maxBudgetUsd).toBe(1.0);
+  });
+
+  it("creates .pencil-sync/ directory in non-interactive mode", async () => {
+    const { runSetup } = await import("../setup.js");
+    await runSetup(undefined, {
+      cwd: dir,
+      nonInteractive: true,
+      defaults: { penFile: "./design.pen", codeDir: "./src" },
+    });
+    await expect(access(join(dir, ".pencil-sync"))).resolves.toBeUndefined();
+  });
+
+  it("exits cleanly with error when required fields missing in non-interactive mode", async () => {
+    const { runSetup } = await import("../setup.js");
+    let threw = false;
+    try {
+      await runSetup(undefined, {
+        cwd: dir,
+        nonInteractive: true,
+        defaults: {},  // no penFile or codeDir
+      });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
+    // Config should not have been written
+    let configExists = false;
+    try {
+      await access(join(dir, "pencil-sync.config.json"));
+      configExists = true;
+    } catch { }
+    expect(configExists).toBe(false);
+  });
+
+  it("non-interactive mode does not require isTTY", async () => {
+    const { runSetup } = await import("../setup.js");
+    let threw = false;
+    try {
+      await runSetup(undefined, {
+        cwd: dir,
+        isTTY: false,
+        nonInteractive: true,
+        defaults: { penFile: "./design.pen", codeDir: "./src" },
+      });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
+  });
+
+  it("contract: non-interactive config is valid JSON parseable by JSON.parse", async () => {
+    const { runSetup } = await import("../setup.js");
+    await runSetup(undefined, {
+      cwd: dir,
+      nonInteractive: true,
+      defaults: { penFile: "./design.pen", codeDir: "./src" },
+    });
+    const raw = await readFile(join(dir, "pencil-sync.config.json"), "utf-8");
+    expect(() => JSON.parse(raw)).not.toThrow();
+  });
+});

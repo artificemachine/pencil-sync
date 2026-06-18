@@ -9,9 +9,21 @@ export interface WizardIO {
   print(msg: string): void;
 }
 
+export interface SetupDefaults {
+  projectName?: string;
+  penFile?: string;
+  codeDir?: string;
+  framework?: string;
+  styling?: string;
+  direction?: string;
+  budget?: string;
+}
+
 export interface SetupOptions {
   cwd?: string;
   isTTY?: boolean;
+  nonInteractive?: boolean;
+  defaults?: SetupDefaults;
 }
 
 export function createReadlineIO(): WizardIO {
@@ -59,9 +71,53 @@ async function configExists(cwd: string): Promise<boolean> {
   }
 }
 
+function createNonInteractiveIO(defaults: SetupDefaults): WizardIO {
+  // Maps question keywords to defaults fields for accurate non-interactive answers
+  const answerMap: Record<string, string | undefined> = {
+    "project name": defaults.projectName,
+    "pen file": defaults.penFile,
+    "pen": defaults.penFile,
+    "code directory": defaults.codeDir,
+    "framework": defaults.framework,
+    "styling": defaults.styling,
+    "direction": defaults.direction,
+    "budget": defaults.budget,
+  };
+
+  return {
+    async ask(question: string, defaultVal?: string): Promise<string> {
+      const lq = question.toLowerCase();
+      for (const [key, val] of Object.entries(answerMap)) {
+        if (lq.includes(key) && val !== undefined) return val;
+      }
+      return defaultVal ?? "";
+    },
+    print(_msg: string) { /* silent in non-interactive */ },
+  };
+}
+
 export async function runSetup(io?: WizardIO, opts: SetupOptions = {}): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const isTTY = opts.isTTY ?? process.stdin.isTTY;
+  const nonInteractive = opts.nonInteractive ?? false;
+  const defaults = opts.defaults ?? {};
+
+  // Non-interactive mode: validate required fields, then run with preset answers
+  if (nonInteractive) {
+    if (!defaults.penFile || !defaults.codeDir) {
+      const msg = "Error: --non-interactive requires --pen-file and --code-dir to be specified.";
+      (io ?? { print: console.log }).print(msg);
+      return;
+    }
+    const niIO = createNonInteractiveIO(defaults);
+    return runSetup(niIO, {
+      cwd,
+      isTTY: true,
+      nonInteractive: false,
+      defaults,
+    });
+  }
+
   const wizard = io ?? createReadlineIO();
 
   if (!isTTY && !io) {
