@@ -3,10 +3,12 @@
 import { Command } from "commander";
 import ora from "ora";
 import chalk from "chalk";
-import { readFile, writeFile, access } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
+import { runDoctor } from "./doctor.js";
+import { runSetup } from "./setup.js";
 import { setLogLevel, log } from "./logger.js";
 import { SyncEngine } from "./sync-engine.js";
 import { Watcher } from "./watcher.js";
@@ -136,44 +138,22 @@ program
   });
 
 program
-  .command("init")
-  .description("Create a pencil-sync config file in the current directory")
+  .command("setup")
+  .alias("init")
+  .description("Interactive wizard to set up pencil-sync for a project")
   .action(async () => {
-    const configPath = join(process.cwd(), "pencil-sync.config.json");
+    await runSetup(undefined, { cwd: process.cwd() });
+  });
 
-    try {
-      await access(configPath);
-      log.error(`Config already exists: ${configPath}`);
-      log.info("Delete it first or edit it directly.");
-      process.exit(1);
-    } catch {
-      // File doesn't exist — good, proceed
-    }
+program
+  .command("doctor")
+  .description("Run preflight checks for the current project")
+  .action(async () => {
+    const globalOpts = program.opts();
+    if (globalOpts.verbose) setLogLevel("debug");
 
-    const template = {
-      version: 1,
-      mappings: [
-        {
-          id: "my-app",
-          penFile: "./design.pen",
-          codeDir: "./src",
-          codeGlobs: ["components/**/*.tsx", "app/**/*.tsx", "*.css"],
-          direction: "both",
-        },
-      ],
-      settings: {
-        debounceMs: 2000,
-        model: "claude-sonnet-4-6",
-        maxBudgetUsd: 0.5,
-        conflictStrategy: "prompt",
-        stateFile: ".pencil-sync-state.json",
-        logLevel: "info",
-      },
-    };
-
-    await writeFile(configPath, JSON.stringify(template, null, 2));
-    log.success(`Config created: ${configPath}`);
-    log.info("Edit the config to set your .pen file and code directory paths.");
+    const result = await runDoctor(globalOpts.config);
+    process.exit(result.allPassed ? 0 : 1);
   });
 
 program

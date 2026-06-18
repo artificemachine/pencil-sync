@@ -119,6 +119,7 @@ export class SyncEngine {
         this.trackSpend(result.tokenUsage);
         if (result.success && !result.skipped) {
           await this.stateStore.updateMappingState(mapping, result.direction, result.penSnapshot);
+          await this.stateStore.writeLastRun(result);
           this.lockManager.setLastSyncDirection(mapping.id, result.direction);
         }
         releaseWithGrace = result.success && !result.skipped;
@@ -157,6 +158,7 @@ export class SyncEngine {
       const shouldPersist = result.success && !result.skipped && !result.dryRun;
       if (shouldPersist) {
         await this.stateStore.updateMappingState(mapping, result.direction, result.penSnapshot);
+        await this.stateStore.writeLastRun(result);
         this.lockManager.setLastSyncDirection(mapping.id, result.direction);
       }
       releaseWithGrace = shouldPersist;

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { detectFramework, detectStyling, loadConfig } from "../config.js";
+import { detectFramework, detectStyling, findPenFiles, loadConfig } from "../config.js";
 
 describe("detectFramework", () => {
   let dir: string;
@@ -89,6 +89,137 @@ describe("detectStyling", () => {
 
   it("returns unknown when nothing detected", async () => {
     expect(await detectStyling(dir)).toBe("unknown");
+  });
+
+  it("detects css-modules from *.module.css file", async () => {
+    await writeFile(join(dir, "App.module.css"), ".root {}");
+    expect(await detectStyling(dir)).toBe("css-modules");
+  });
+
+  it("detects css when only plain *.css file present", async () => {
+    await writeFile(join(dir, "styles.css"), "body {}");
+    expect(await detectStyling(dir)).toBe("css");
+  });
+
+  it("tailwind config file beats css-modules when both present", async () => {
+    await writeFile(join(dir, "tailwind.config.js"), "module.exports = {}");
+    await writeFile(join(dir, "App.module.css"), ".root {}");
+    expect(await detectStyling(dir)).toBe("tailwind");
+  });
+
+  it("chaos: malformed package.json falls through without throwing", async () => {
+    await writeFile(join(dir, "package.json"), "{ broken ]]]");
+    let threw = false;
+    let result: string | undefined;
+    try {
+      result = await detectStyling(dir);
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
+    expect(result).toBe("unknown");
+  });
+});
+
+describe("findPenFiles", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "pencil-find-pen-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // Smoke
+  it("smoke: findPenFiles is importable and callable", async () => {
+    const result = await findPenFiles(dir);
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  // Unit
+  it("returns empty array when no pen files present", async () => {
+    await writeFile(join(dir, "design.tsx"), "content");
+    const result = await findPenFiles(dir);
+    expect(result).toHaveLength(0);
+  });
+
+  it("finds pen file in root directory", async () => {
+    await writeFile(join(dir, "design.pen"), "{}");
+    const result = await findPenFiles(dir);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toContain("design.pen");
+  });
+
+  it("finds pen files recursively in subdirectories", async () => {
+    await mkdir(join(dir, "screens"), { recursive: true });
+    await writeFile(join(dir, "screens", "home.pen"), "{}");
+    await writeFile(join(dir, "screens", "settings.pen"), "{}");
+    const result = await findPenFiles(dir);
+    expect(result).toHaveLength(2);
+    expect(result.some((p) => p.includes("home.pen"))).toBe(true);
+    expect(result.some((p) => p.includes("settings.pen"))).toBe(true);
+  });
+
+  it("ignores node_modules directory", async () => {
+    await mkdir(join(dir, "node_modules", "some-pkg"), { recursive: true });
+    await writeFile(join(dir, "node_modules", "some-pkg", "demo.pen"), "{}");
+    const result = await findPenFiles(dir);
+    expect(result).toHaveLength(0);
+  });
+
+  it("ignores .pencil-sync directory", async () => {
+    await mkdir(join(dir, ".pencil-sync"), { recursive: true });
+    await writeFile(join(dir, ".pencil-sync", "hidden.pen"), "{}");
+    const result = await findPenFiles(dir);
+    expect(result).toHaveLength(0);
+  });
+
+  it("ignores other hidden directories", async () => {
+    await mkdir(join(dir, ".git"), { recursive: true });
+    await writeFile(join(dir, ".git", "hidden.pen"), "{}");
+    const result = await findPenFiles(dir);
+    expect(result).toHaveLength(0);
+  });
+
+  // Contract
+  it("contract: always returns string[]", async () => {
+    await writeFile(join(dir, "a.pen"), "{}");
+    const result = await findPenFiles(dir);
+    expect(Array.isArray(result)).toBe(true);
+    for (const item of result) {
+      expect(typeof item).toBe("string");
+    }
+  });
+
+  // Regression
+  it("regression: detectFramework still works after findPenFiles is added", async () => {
+    await writeFile(join(dir, "next.config.js"), "module.exports = {}");
+    expect(await detectFramework(dir)).toBe("nextjs");
+  });
+
+  // Chaos
+  it("chaos: maxDepth=0 returns only root-level pen files (no recursion)", async () => {
+    await mkdir(join(dir, "sub"), { recursive: true });
+    await writeFile(join(dir, "root.pen"), "{}");
+    await writeFile(join(dir, "sub", "nested.pen"), "{}");
+    const result = await findPenFiles(dir, 0);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toContain("root.pen");
+  });
+
+  it("chaos: unreadable directory returns empty array without throwing", async () => {
+    const fakeDir = join(dir, "nonexistent");
+    let threw = false;
+    let result: string[] | undefined;
+    try {
+      result = await findPenFiles(fakeDir);
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
+    expect(result).toEqual([]);
   });
 });
 
