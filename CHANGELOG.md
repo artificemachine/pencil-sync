@@ -88,3 +88,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-18: feat(mcp): add pencil-sync-mcp binary with MCP stdio server skeleton
 - 2026-06-18: feat(mcp): add pencil_get_config, pencil_diff_design, pencil_diff_code, pencil_detect_conflict tools
 - 2026-06-18: feat(mcp): add pencil_build_prompt, pencil_apply_fill_changes, pencil_record_sync tools
+- 2026-06-18: chore(release): bump version to 0.2.0 — MCP server feature (minor)

@@ -15,7 +15,7 @@ import { extractErrorMessage } from "./utils.js";
 import type { PenDiffEntry, SyncDirection } from "./types.js";
 
 const SERVER_NAME = "pencil-sync";
-const SERVER_VERSION = "0.1.5";
+const SERVER_VERSION = "0.2.0";
 
 function ok(data: unknown): { content: [{ type: "text"; text: string }] } {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
