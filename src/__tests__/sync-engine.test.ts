@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, mkdir, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { PencilSyncConfig, MappingConfig } from "../types.js";
@@ -526,5 +526,58 @@ describe("SyncEngine", () => {
       expect(result.direction).toBe("pen-to-code");
       expect(result.mappingId).toBe("test");
     });
+  });
+});
+
+describe("SyncEngine — last-run.json integration", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "pencil-lastrun-engine-"));
+    await mkdir(join(dir, "code"));
+    await writeFile(join(dir, "code", "app.tsx"), "content");
+    await writeFile(join(dir, "design.pen"), JSON.stringify({ children: [] }));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+    vi.clearAllMocks();
+  });
+
+  it("integration: syncMapping writes last-run.json after successful sync", async () => {
+    const stateFile = join(dir, ".pencil-sync", "state.json");
+    const lastRunPath = join(dir, ".pencil-sync", "last-run.json");
+
+    const localMapping: MappingConfig = {
+      id: "lr-test",
+      penFile: join(dir, "design.pen"),
+      codeDir: join(dir, "code"),
+      codeGlobs: ["**/*.tsx"],
+      direction: "both",
+    };
+
+    const localConfig: PencilSyncConfig = {
+      version: 1,
+      mappings: [localMapping],
+      settings: {
+        debounceMs: 0,
+        model: "claude-sonnet-4-6",
+        maxBudgetUsd: 1.0,
+        conflictStrategy: "pen-wins",
+        stateFile,
+        logLevel: "error",
+      },
+    };
+
+    const eng = new SyncEngine(localConfig);
+    await eng.initialize();
+
+    const result = await eng.syncMapping(localMapping, "pen-changed");
+    expect(result.success).toBe(true);
+
+    const lastRunExists = await access(lastRunPath).then(() => true).catch(() => false);
+    expect(lastRunExists).toBe(true);
+
+    eng.shutdown();
   });
 });

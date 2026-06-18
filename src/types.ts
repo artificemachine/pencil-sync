@@ -111,7 +111,7 @@ export const DEFAULT_SETTINGS: Settings = {
   model: "claude-sonnet-4-6",
   maxBudgetUsd: 0.5,
   conflictStrategy: "prompt",
-  stateFile: ".pencil-sync-state.json",
+  stateFile: ".pencil-sync/state.json",
   logLevel: "info",
   mcpConfigPath: undefined,
 };
