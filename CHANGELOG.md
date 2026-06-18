@@ -78,3 +78,5 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-12: chore(release): bump to v0.1.5 (fast-path fix, glob unification, ESLint, coverage)
 - 2026-06-12: chore: ignore .serena/, .hablatone, coverage/ in .gitignore
 - 2026-06-18: docs(plan): add iteration plan for Executor interface refactor (Option A)
+
+- 2026-06-18: refactor(executor): add Executor interface and LocalClaudeExecutor wrapping runClaude
