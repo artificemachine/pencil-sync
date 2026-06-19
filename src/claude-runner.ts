@@ -107,7 +107,10 @@ async function runOnce(options: ClaudeRunOptions): Promise<ClaudeRunResult> {
   ];
 
   if (options.mcpConfigPath) {
-    args.push("--mcp-config", options.mcpConfigPath);
+    const mcpPath = options.mcpConfigPath.startsWith("~/")
+      ? options.mcpConfigPath.replace("~", process.env["HOME"] ?? "~")
+      : options.mcpConfigPath;
+    args.push("--mcp-config", mcpPath);
   }
 
   log.debug(`Spawning: claude ${args.slice(0, 4).join(" ")}...`);

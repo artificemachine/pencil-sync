@@ -114,3 +114,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-19: fix(config): allow penFile outside configDir — read-only input must not be traversal-guarded
 - 2026-06-19: chore(release): bump to v0.5.1 (penFile path-traversal fix)
 - 2026-06-19: fix(setup): validate direction field at config load and wizard input; remove 'pen' key from non-interactive answerMap to prevent infinite loop
+- 2026-06-19: fix(claude-runner): expand ~ in mcpConfigPath using HOME env var
