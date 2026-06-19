@@ -6,8 +6,11 @@ import type {
   Framework,
   Styling,
   Settings,
+  SyncDirection,
 } from "./types.js";
 import { DEFAULT_SETTINGS } from "./types.js";
+
+const VALID_DIRECTIONS: SyncDirection[] = ["both", "pen-to-code", "code-to-pen"];
 import { log } from "./logger.js";
 import { validatePathWithin } from "./utils.js";
 
@@ -185,6 +188,12 @@ async function resolveMapping(
   resolved.codeDir = validatePathWithin(configDir, mapping.codeDir);
 
   const projectRoot = await findProjectRoot(resolved.codeDir, configDir);
+
+  if (!VALID_DIRECTIONS.includes(mapping.direction as SyncDirection)) {
+    throw new Error(
+      `Invalid direction "${mapping.direction}" in mapping "${mapping.id}". Must be one of: both, pen-to-code, code-to-pen.`,
+    );
+  }
 
   if (!resolved.framework) {
     resolved.framework = await detectFramework(projectRoot);

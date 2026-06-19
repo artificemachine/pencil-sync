@@ -104,7 +104,6 @@ function createNonInteractiveIO(defaults: SetupDefaults): WizardIO {
   const answerMap: Record<string, string | undefined> = {
     "project name": defaults.projectName,
     "pen file": defaults.penFile,
-    "pen": defaults.penFile,
     "code directory": defaults.codeDir,
     "framework": defaults.framework,
     "styling": defaults.styling,
@@ -244,8 +243,16 @@ export async function runSetup(io?: WizardIO, opts: SetupOptions = {}): Promise<
       key: "direction",
       label: STEP_LABELS[5],
       run: async (io, c) => {
-        const ans = await io.ask("Sync direction (both/pen-to-code/code-to-pen)", c.direction || "both");
-        return ans.toLowerCase() === "back" ? null : ans;
+        const VALID = ["both", "pen-to-code", "code-to-pen"];
+        let ans: string;
+        do {
+          ans = await io.ask("Sync direction (both/pen-to-code/code-to-pen)", c.direction || "both");
+          if (ans.toLowerCase() === "back") return null;
+          if (!VALID.includes(ans)) {
+            io.print(`  Invalid direction "${ans}". Enter one of: both, pen-to-code, code-to-pen.`);
+          }
+        } while (!VALID.includes(ans));
+        return ans;
       },
     },
     {
