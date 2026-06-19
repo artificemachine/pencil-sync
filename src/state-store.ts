@@ -89,6 +89,10 @@ export class StateStore {
     return this.state.mappings[mappingId];
   }
 
+  clearMappingState(mappingId: string): void {
+    delete this.state.mappings[mappingId];
+  }
+
   async updateMappingState(
     mapping: MappingConfig,
     direction: SyncDirection,

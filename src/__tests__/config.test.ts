@@ -365,6 +365,42 @@ describe("loadConfig", () => {
     await expect(loadConfig(configPath)).rejects.toThrow("Duplicate mapping id(s): app");
   });
 
+  it("rejects invalid direction value in mapping", async () => {
+    const configPath = join(dir, "pencil-sync.config.json");
+    await writeFile(configPath, JSON.stringify({
+      mappings: [{
+        id: "bad-dir",
+        penFile: "design.pen",
+        codeDir: "code",
+        codeGlobs: ["**/*.tsx"],
+        direction: "/Users/someone/Downloads/start.pen",
+      }],
+    }));
+
+    await expect(loadConfig(configPath)).rejects.toThrow(
+      /Invalid direction.*Must be one of: both, pen-to-code, code-to-pen/,
+    );
+  });
+
+  it.each(["both", "pen-to-code", "code-to-pen"] as const)(
+    "accepts valid direction %s",
+    async (direction) => {
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify({
+        mappings: [{
+          id: "valid-dir",
+          penFile: "design.pen",
+          codeDir: "code",
+          codeGlobs: ["**/*.tsx"],
+          direction,
+        }],
+      }));
+
+      const config = await loadConfig(configPath);
+      expect(config.mappings[0].direction).toBe(direction);
+    },
+  );
+
   it("merges settings with no overrides", async () => {
     const configPath = join(dir, "pencil-sync.config.json");
     await writeFile(configPath, JSON.stringify({

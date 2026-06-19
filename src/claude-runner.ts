@@ -107,15 +107,21 @@ async function runOnce(options: ClaudeRunOptions): Promise<ClaudeRunResult> {
   ];
 
   if (options.mcpConfigPath) {
-    args.push("--mcp-config", options.mcpConfigPath);
+    const mcpPath = options.mcpConfigPath.startsWith("~/")
+      ? options.mcpConfigPath.replace("~", process.env["HOME"] ?? "~")
+      : options.mcpConfigPath;
+    args.push("--mcp-config", mcpPath);
   }
 
   log.debug(`Spawning: claude ${args.slice(0, 4).join(" ")}...`);
 
-  // Strip env vars that prevent nested Claude CLI sessions
+  // Strip env vars that prevent nested Claude CLI sessions, and strip
+  // ANTHROPIC_API_KEY so the child authenticates via the subscription (Max/Pro)
+  // rather than falling back to per-token API billing silently.
   const cleanEnv = { ...process.env };
   delete cleanEnv.CLAUDECODE;
   delete cleanEnv.CLAUDE_CODE_SESSION;
+  delete cleanEnv.ANTHROPIC_API_KEY;
 
   return new Promise((resolve) => {
     let resolved = false;

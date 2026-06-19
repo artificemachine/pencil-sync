@@ -17,6 +17,15 @@ export interface MappingConfig {
   styleFiles?: string[];
 }
 
+export type AIProvider = "anthropic" | "openai-compatible" | "google";
+
+/**
+ * Explicit engine selector. "claude-cli" forces the subscription-backed executor
+ * path even if aiProvider is also set. When omitted, the engine is inferred:
+ * aiProvider set → hosted API; aiProvider unset → claude-cli.
+ */
+export type SyncProvider = "claude-cli" | AIProvider;
+
 export interface Settings {
   debounceMs: number;
   model: string;
@@ -25,6 +34,18 @@ export interface Settings {
   stateFile: string;
   logLevel: LogLevel;
   mcpConfigPath?: string;
+  /**
+   * Explicit engine: "claude-cli" uses the local claude binary (subscription);
+   * "anthropic" / "openai-compatible" / "google" calls the hosted API.
+   * Omitting this field falls back to the legacy inference rule.
+   */
+  provider?: SyncProvider;
+  /** When set, code-to-pen uses direct API calls instead of Claude CLI subprocess */
+  aiProvider?: AIProvider;
+  /** API key for the selected aiProvider */
+  apiKey?: string;
+  /** Base URL override for openai-compatible providers (DeepSeek, MiniMax, etc.) */
+  apiBaseUrl?: string;
 }
 
 export interface PencilSyncConfig {
@@ -122,4 +143,8 @@ export const DEFAULT_SETTINGS: Settings = {
   stateFile: ".pencil-sync/state.json",
   logLevel: "info",
   mcpConfigPath: undefined,
+  provider: undefined,
+  aiProvider: undefined,
+  apiKey: undefined,
+  apiBaseUrl: undefined,
 };

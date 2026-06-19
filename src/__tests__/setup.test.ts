@@ -709,6 +709,16 @@ describe("setup — confirmation summary screen", () => {
     expect(() => JSON.parse(raw)).not.toThrow();
   });
 
+  it("re-prompts when an invalid direction is entered, then accepts a valid one", async () => {
+    const { runSetup } = await import("../setup.js");
+    // Step 6 (direction): first answer is a file path (invalid), second is "both" (valid)
+    const io = makeIO(["myapp", "1", "./src", "astro", "css", "/some/file.pen", "both", "0.5", "y"]);
+    await runSetup(io, { cwd: dir });
+    const config = JSON.parse(await readFile(join(dir, "pencil-sync.config.json"), "utf-8"));
+    expect(config.mappings[0].direction).toBe("both");
+    expect(io._printed.some((s) => s.includes("Invalid direction"))).toBe(true);
+  });
+
   it("chaos: empty string at confirmation defaults to 'y' and writes config", async () => {
     const { runSetup } = await import("../setup.js");
     // empty string returns defaultVal which should be "y"
