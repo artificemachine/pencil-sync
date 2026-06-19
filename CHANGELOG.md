@@ -115,3 +115,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-19: chore(release): bump to v0.5.1 (penFile path-traversal fix)
 - 2026-06-19: fix(setup): validate direction field at config load and wizard input; remove 'pen' key from non-interactive answerMap to prevent infinite loop
 - 2026-06-19: fix(claude-runner): expand ~ in mcpConfigPath using HOME env var
+- 2026-06-19: feat(ai-runner): multi-provider AI runner (Anthropic, OpenAI-compat, Google) + PencilMcpClient; code-to-pen now uses direct API calls when aiProvider is set, eliminating Claude CLI subprocess MCP conflict
+- 2026-06-19: fix(pencil-mcp-client): add setVariables() method — token syncs must go through set_variables, not batch_design
+- 2026-06-19: feat(mcp-server): add pencil_invalidate_state tool + StateStore.clearMappingState() — enables re-seeding stale hashes after a design rebuild
+- 2026-06-19: fix(pencil-sync command): correct step 6 to route token-only changes through set_variables; add state invalidation guidance
+- 2026-06-19: fix(claude-runner): strip ANTHROPIC_API_KEY from child env to guarantee subscription billing on executor path
+- 2026-06-19: feat(code-to-pen): log active engine at INFO level ("Engine: claude-cli" / "Engine: <provider> API")
+- 2026-06-19: fix(cost-labels): clarify costUsd is an API-rate estimate in budget warnings and debug logs; actual billing depends on plan
+- 2026-06-19: feat(code-to-pen): add explicit provider field — settings.provider="claude-cli" forces subscription executor even when aiProvider is also set
+- 2026-06-19: fix(config): warn at load time when apiBaseUrl uses minimax.chat (China domain) instead of minimaxi.chat (international) to prevent misleading 401 errors

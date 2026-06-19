@@ -256,6 +256,34 @@ export async function loadConfig(
   const configDir = dirname(resolvedPath);
   const settings: Settings = safeMerge(DEFAULT_SETTINGS, parsed.settings);
 
+  // Expand ${VAR_NAME} in apiKey, or auto-populate from well-known env vars
+  if (settings.apiKey?.startsWith("${") && settings.apiKey.endsWith("}")) {
+    const varName = settings.apiKey.slice(2, -1);
+    settings.apiKey = process.env[varName];
+  } else if (!settings.apiKey && settings.aiProvider) {
+    const envMap: Record<string, string> = {
+      anthropic: "ANTHROPIC_API_KEY",
+      "openai-compatible": "OPENAI_API_KEY",
+      google: "GOOGLE_API_KEY",
+    };
+    const varName = envMap[settings.aiProvider];
+    if (varName) settings.apiKey = process.env[varName];
+  }
+
+  // Warn about common MiniMax domain mismatch: minimax.chat (China) returns 401 for a valid key;
+  // the international domain is minimaxi.chat (double-i)
+  if (
+    settings.apiBaseUrl &&
+    settings.apiBaseUrl.includes("minimax.chat") &&
+    !settings.apiBaseUrl.includes("minimaxi.chat")
+  ) {
+    console.warn(
+      "[pencil-sync] WARNING: apiBaseUrl looks like the MiniMax China domain (minimax.chat). " +
+        "For international accounts use api.minimaxi.chat/v1 (double-i). " +
+        "The China domain returns '401 invalid api key' for valid international keys.",
+    );
+  }
+
   settings.stateFile = validatePathWithin(configDir, settings.stateFile);
 
   const mappings = await Promise.all(

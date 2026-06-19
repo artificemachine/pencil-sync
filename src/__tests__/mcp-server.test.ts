@@ -342,7 +342,7 @@ describe("mcp-server", () => {
   // --- Iteration 4: Prompt delivery, fill fast-path, sync recording ---
 
   describe("smoke — Iteration 4 tools registered", () => {
-    it("all 7 tools are registered after Iteration 4", () => {
+    it("all 8 tools are registered after Iteration 4", () => {
       const server = createMcpServer();
       const tools = Object.keys((server as any)._registeredTools as Record<string, unknown>);
       expect(tools).toContain("pencil_build_prompt");
@@ -621,8 +621,8 @@ describe("mcp-server", () => {
     });
   });
 
-  describe("contract — all 7 tools return valid MCP shape", () => {
-    it("full server tool contract: all 7 tools return { content: [{ type: 'text', text: string }] }", async () => {
+  describe("contract — all 8 tools return valid MCP shape", () => {
+    it("full server tool contract: all 8 tools return { content: [{ type: 'text', text: string }] }", async () => {
       const dir = await mkdtemp(join(tmpdir(), "pencil-mcp-full-"));
       try {
         await mkdir(join(dir, "code"), { recursive: true });
@@ -633,7 +633,7 @@ describe("mcp-server", () => {
 
         const server = createMcpServer();
         const allTools = Object.keys((server as any)._registeredTools as Record<string, unknown>);
-        expect(allTools).toHaveLength(7);
+        expect(allTools).toHaveLength(8);
 
         for (const name of allTools) {
           const result = await callTool(name, {

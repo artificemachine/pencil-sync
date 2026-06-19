@@ -170,6 +170,27 @@ export function createMcpServer(): McpServer {
   );
 
   server.tool(
+    "pencil_invalidate_state",
+    "Clear the recorded code-file hashes for a mapping so the next sync treats all files as changed. " +
+      "Use this after manually rebuilding a design to force a full structural re-sync, or when state.json " +
+      "holds false 'synced' hashes that predate the actual canvas work.",
+    {
+      configPath: z.string().describe("Absolute path to pencil-sync.config.json"),
+      mappingId: z.string().describe("ID of the mapping to invalidate"),
+    },
+    async ({ configPath, mappingId }) => {
+      try {
+        const { store } = await loadConfigAndState(configPath, mappingId);
+        store.clearMappingState(mappingId);
+        await store.save();
+        return ok({ ok: true, mappingId, note: "State cleared — next pencil_diff_code will report all files as changed." });
+      } catch (e) {
+        return err(extractErrorMessage(e));
+      }
+    },
+  );
+
+  server.tool(
     "pencil_record_sync",
     "Record that a sync has completed by updating the state store with current file hashes. Call this after the host agent has applied all edits.",
     {

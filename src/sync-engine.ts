@@ -80,7 +80,7 @@ export class SyncEngine {
   private checkBudget(prompt?: string): string | undefined {
     const remaining = this.getRemainingBudgetUsd();
     if (remaining <= 0) {
-      return `Budget exhausted ($${this.cumulativeSpendUsd.toFixed(4)} spent of $${this.config.settings.maxBudgetUsd} limit)`;
+      return `Budget exhausted (API-rate estimate: $${this.cumulativeSpendUsd.toFixed(4)} of $${this.config.settings.maxBudgetUsd} limit; actual billing depends on your plan)`;
     }
 
     // Pre-flight estimate: project both input and output cost so a large
@@ -93,7 +93,7 @@ export class SyncEngine {
         (estimatedInput / 1_000_000) * pricing.input +
         (estimatedOutput / 1_000_000) * pricing.output;
       if (estimatedCost > remaining) {
-        return `Estimated sync cost ($${estimatedCost.toFixed(4)}, including projected output) exceeds remaining budget ($${remaining.toFixed(4)})`;
+        return `API-rate estimate ($${estimatedCost.toFixed(4)}) exceeds remaining budget ($${remaining.toFixed(4)}); actual billing depends on your plan`;
       }
     }
 
@@ -104,7 +104,7 @@ export class SyncEngine {
     if (!tokenUsage) return;
     const cost = estimateCost(this.config.settings.model, tokenUsage);
     this.cumulativeSpendUsd += cost;
-    log.debug(`Token usage: ${tokenUsage.input} in / ${tokenUsage.output} out, cost: $${cost.toFixed(4)}, cumulative: $${this.cumulativeSpendUsd.toFixed(4)}`);
+    log.debug(`Token usage: ${tokenUsage.input} in / ${tokenUsage.output} out, API-rate estimate: $${cost.toFixed(4)}, cumulative: $${this.cumulativeSpendUsd.toFixed(4)}`);
   }
 
   async syncMapping(

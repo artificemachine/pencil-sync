@@ -386,7 +386,7 @@ describe("SyncEngine", () => {
       const result = await engine2.syncMapping(mapping, "code-changed");
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("projected output");
+      expect(result.error).toContain("exceeds remaining budget");
       expect(mockedRunClaude).not.toHaveBeenCalled();
 
       engine2.shutdown();
