@@ -131,3 +131,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-24: fix(pencil-mcp-client): batchGet/batchDesign now throw on isError and non-JSON instead of swallowing errors; fix(code-to-pen): syncCodeToPenDirect returns failure on unreadable .pen or no-op after batch_design [audit iter-3]
 - 2026-06-24: fix(provider): honor settings.provider in runner creation and env-key resolution; pen-to-code errors clearly on non-claude-cli provider [audit iter-4]
 - 2026-06-24: fix(ai-runners): add claude-haiku-4-5 alias to pricing table; pass systemInstruction to Google getGenerativeModel; warn on OpenAI finish_reason:length truncation; add SSRF guard for non-https and localhost apiBaseUrl [audit iter-10]
+- 2026-06-24: chore(release): bump version to 0.5.2 — 10-iteration audit remediation (iters 1-10)
