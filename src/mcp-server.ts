@@ -213,7 +213,7 @@ export function createMcpServer(): McpServer {
         } catch {
           // Pen file unreadable — update state without snapshot; diff_design will see full baseline on next read
         }
-        await store.updateMappingState(mapping, direction as SyncDirection, penSnapshot);
+        await store.updateMappingState(mapping, direction as SyncDirection, penSnapshot ?? undefined);
         const lastRun: SyncResult = {
           success: true,
           direction: direction as SyncDirection,

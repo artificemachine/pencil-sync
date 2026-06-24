@@ -15,17 +15,18 @@ const VALID_DIRECTIONS: SyncDirection[] = ["both", "pen-to-code", "code-to-pen"]
 import { log } from "./logger.js";
 import { validatePathWithin } from "./utils.js";
 
+const DIRECTION_VALUES = ["both", "pen-to-code", "code-to-pen"] as const;
+
 const MappingInputSchema = z
   .object({
-    id: z.string({ required_error: "mapping.id is required" }),
-    penFile: z.string({ required_error: "mapping.penFile is required" }),
-    codeDir: z.string({ required_error: "mapping.codeDir is required" }),
+    id: z.string({ message: "mapping.id is required" }),
+    penFile: z.string({ message: "mapping.penFile is required" }),
+    codeDir: z.string({ message: "mapping.codeDir is required" }),
     codeGlobs: z.array(z.string(), {
-      required_error: "mapping.codeGlobs is required",
-      invalid_type_error: "mapping.codeGlobs must be an array of strings",
+      message: "mapping.codeGlobs is required",
     }),
-    direction: z.enum(["both", "pen-to-code", "code-to-pen"], {
-      errorMap: () => ({
+    direction: z.enum(DIRECTION_VALUES, {
+      error: () => ({
         message: "mapping.direction must be 'both', 'pen-to-code', or 'code-to-pen'",
       }),
     }),
@@ -36,8 +37,7 @@ const ConfigInputSchema = z.object({
   version: z.number().optional(),
   mappings: z
     .array(MappingInputSchema, {
-      required_error: "Config.mappings is required.",
-      invalid_type_error: "Config.mappings must be an array.",
+      message: "Config.mappings is required.",
     })
     .min(1, "Config must have at least one mapping."),
 });
