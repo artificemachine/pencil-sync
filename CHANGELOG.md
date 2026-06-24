@@ -134,3 +134,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-24: chore(release): bump version to 0.5.2 — 10-iteration audit remediation (iters 1-10)
 - 2026-06-24: fix(ci): add .npmrc legacy-peer-deps=true to resolve openai peerOptional zod v3 conflict on Node 22
 - 2026-06-24: fix(config): migrate zod schema params from v3 API (required_error/invalid_type_error/errorMap) to v4 API (message/error); fix mcp-server null→undefined for penSnapshot
+- 2026-06-24: fix(ci): rename .shipguard.yml exclude_rules→disable_rules (correct ShipGuard field); add JS-002 suppression (Array.prototype.join false positive); add JS-004 JS-002 suppression rationale; add resolve import and symlink traversal guard to state-store.ts collectFiles

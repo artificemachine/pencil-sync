@@ -1,7 +1,7 @@
 import { readFile, writeFile, unlink, copyFile, mkdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { readdir, rename } from "node:fs/promises";
-import { join, relative, dirname, basename } from "node:path";
+import { join, relative, resolve, dirname, basename } from "node:path";
 import { log } from "./logger.js";
 import { extractErrorMessage } from "./utils.js";
 import { IGNORED_DIRS } from "./ignored-dirs.js";
@@ -267,7 +267,9 @@ async function collectFiles(
     }
 
     for (const entry of entries) {
-      const fullPath = join(currentDir, entry.name);
+      const fullPath = resolve(join(currentDir, entry.name));
+      // Guard against symlinks that resolve outside the root dir
+      if (!fullPath.startsWith(resolve(dir))) continue;
 
       if (entry.isDirectory()) {
         if (IGNORED_DIRS.has(entry.name)) {
