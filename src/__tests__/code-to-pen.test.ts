@@ -4,12 +4,39 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { MappingConfig, Settings } from "../types.js";
 
+const { mockBatchDesignFn, mockBatchGetFn, mockRunnerCompleteFn, MockPencilMcpClient } = vi.hoisted(() => {
+  const mockBatchDesignFn = vi.fn().mockResolvedValue(undefined);
+  const mockBatchGetFn = vi.fn().mockResolvedValue({});
+  const mockRunnerCompleteFn = vi.fn().mockResolvedValue({
+    text: "Insert({name: 'n1'})",
+    usage: { input: 100, output: 50 },
+  });
+  const MockPencilMcpClient = vi.fn(function (this: Record<string, unknown>) {
+    this.connect = vi.fn().mockResolvedValue(undefined);
+    this.disconnect = vi.fn().mockResolvedValue(undefined);
+    this.batchGet = mockBatchGetFn;
+    this.batchDesign = mockBatchDesignFn;
+  });
+  return { mockBatchDesignFn, mockBatchGetFn, mockRunnerCompleteFn, MockPencilMcpClient };
+});
+
 vi.mock("../claude-runner.js", () => ({
   runClaude: vi.fn(),
 }));
 
 vi.mock("../prompt-builder.js", () => ({
   buildCodeToPenPrompt: vi.fn().mockResolvedValue("test prompt"),
+}));
+
+vi.mock("../pencil-mcp-client.js", () => ({
+  PencilMcpClient: MockPencilMcpClient,
+}));
+
+vi.mock("../ai/factory.js", () => ({
+  createRunner: vi.fn().mockResolvedValue({
+    complete: mockRunnerCompleteFn,
+    estimateCost: vi.fn().mockReturnValue(0),
+  }),
 }));
 
 const { syncCodeToPen } = await import("../code-to-pen.js");
@@ -241,6 +268,53 @@ describe("syncCodeToPen", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBeTruthy();
+    });
+  });
+
+  describe("Iteration 3 — syncCodeToPenDirect (direct API path)", () => {
+    let directSettings: Settings;
+
+    beforeEach(() => {
+      directSettings = {
+        ...settings,
+        aiProvider: "anthropic",
+        mcpConfigPath: "/fake/mcp.json",
+      };
+      // Re-establish mock implementations cleared by outer afterEach
+      mockBatchDesignFn.mockResolvedValue(undefined);
+      mockBatchGetFn.mockResolvedValue({});
+      mockRunnerCompleteFn.mockResolvedValue({
+        text: "Insert({name: 'n1'})",
+        usage: { input: 100, output: 50 },
+      });
+    });
+
+    it("unreadable .pen after batch_design returns success: false", async () => {
+      mockBatchDesignFn.mockImplementationOnce(async () => {
+        await rm(join(dir, "design.pen"), { force: true });
+      });
+
+      const result = await syncCodeToPen(mapping, directSettings, ["app.tsx"]);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/Could not read .pen file/);
+    }, 5000);
+
+    it("pen unchanged after batch_design returns success: false (no-op guard)", async () => {
+      // batchDesign mock does nothing — file stays identical → hashes equal → penChanged = false
+      const result = await syncCodeToPen(mapping, directSettings, ["app.tsx"]);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/unchanged/);
+    }, 5000);
+
+    it("integration: batchDesign error propagates to SyncResult failure", async () => {
+      mockBatchDesignFn.mockRejectedValueOnce(new Error("batch_design failed: element not found"));
+
+      const result = await syncCodeToPen(mapping, directSettings, ["app.tsx"]);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("batch_design failed");
     });
   });
 });

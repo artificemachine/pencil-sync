@@ -279,3 +279,54 @@ describe("StateStore - backup and recovery", () => {
   });
 
 });
+
+describe("Iteration 6 — backup fallback on corruption", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "pencil-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  async function seedValidState(stateFile: string): Promise<void> {
+    const penFile = join(dir, "design.pen");
+    const codeDir = join(dir, "code");
+    await mkdir(codeDir, { recursive: true });
+    await writeFile(penFile, "pen");
+    await writeFile(join(codeDir, "app.tsx"), "code");
+    const mapping = { id: "m1", penFile, codeDir, codeGlobs: ["**/*.tsx"], direction: "both" as const };
+    const store = new StateStore(stateFile);
+    await store.load();
+    await store.updateMappingState(mapping, "pen-to-code"); // 1st save — no backup yet
+    await store.updateMappingState(mapping, "pen-to-code"); // 2nd save — creates backup
+  }
+
+  it("corrupt primary with valid .backup recovers from backup", async () => {
+    const stateFile = join(dir, "state.json");
+    await seedValidState(stateFile);
+
+    // Corrupt the primary state file
+    await writeFile(stateFile, "{not valid json{{{{");
+
+    // A new store should recover from the backup
+    const store2 = new StateStore(stateFile);
+    await store2.load();
+    expect(store2.getMappingState("m1")).toBeDefined();
+  });
+
+  it("corrupt primary and corrupt backup falls back to empty state", async () => {
+    const stateFile = join(dir, "state.json");
+    await seedValidState(stateFile);
+
+    // Corrupt both files
+    await writeFile(stateFile, "{not valid json{{{{");
+    await writeFile(stateFile + ".backup", "{also bad json{{{{");
+
+    const store2 = new StateStore(stateFile);
+    await store2.load();
+    expect(store2.getMappingState("m1")).toBeUndefined();
+  });
+});

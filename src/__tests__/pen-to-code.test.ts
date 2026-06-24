@@ -243,12 +243,9 @@ describe("syncPenToCode", () => {
         makeSnapshot("t1", { name: "title", type: "text", content: "old title", fill: "#fff" }),
       );
 
-      mockedRunClaude.mockResolvedValue({
-        success: true,
-        stdout: "Updated title text",
-        stderr: "",
-        exitCode: 0,
-        tokenUsage: { input: 500, output: 100 },
+      mockedRunClaude.mockImplementation(async () => {
+        await writeFile(join(dir, "code", "app.tsx"), "updated title content");
+        return { success: true, stdout: "Updated title text", stderr: "", exitCode: 0, tokenUsage: { input: 500, output: 100 } };
       });
 
       const result = await syncPenToCode(mapping, settings, previousState);
@@ -268,11 +265,9 @@ describe("syncPenToCode", () => {
         makeSnapshot("t1", { name: "heading", type: "text", fontSize: 16, fontWeight: "400" }),
       );
 
-      mockedRunClaude.mockResolvedValue({
-        success: true,
-        stdout: "Updated font size and weight",
-        stderr: "",
-        exitCode: 0,
+      mockedRunClaude.mockImplementation(async () => {
+        await writeFile(join(dir, "code", "app.tsx"), "updated typography content");
+        return { success: true, stdout: "Updated font size and weight", stderr: "", exitCode: 0 };
       });
 
       const result = await syncPenToCode(mapping, settings, previousState);
@@ -326,12 +321,9 @@ describe("syncPenToCode", () => {
         t1: { name: "btnText", type: "text", content: "send", fill: "#fff" },
       });
 
-      mockedRunClaude.mockResolvedValue({
-        success: true,
-        stdout: "Updated text",
-        stderr: "",
-        exitCode: 0,
-        tokenUsage: { input: 300, output: 50 },
+      mockedRunClaude.mockImplementation(async () => {
+        await writeFile(join(dir, "code", "app.tsx"), "updated text content");
+        return { success: true, stdout: "Updated text", stderr: "", exitCode: 0, tokenUsage: { input: 300, output: 50 } };
       });
 
       const result = await syncPenToCode(mapping, settings, previousState);
@@ -617,9 +609,10 @@ describe("syncPenToCode", () => {
       );
 
       const fakeExecutor = {
-        run: vi.fn().mockResolvedValue({
-          success: true, stdout: "done", stderr: "", exitCode: 0,
-          tokenUsage: { input: 200, output: 40 },
+        // Write a file so the no-op guard (claudeFiles.length === 0) does not trigger
+        run: vi.fn().mockImplementation(async () => {
+          await writeFile(join(dir, "code", "app.tsx"), "updated by executor");
+          return { success: true, stdout: "done", stderr: "", exitCode: 0, tokenUsage: { input: 200, output: 40 } };
         }),
       };
 
@@ -683,6 +676,168 @@ describe("syncPenToCode", () => {
         await rm(dir, { recursive: true, force: true });
       }
     });
+  });
+});
+
+describe("applyFillChanges — color fast-path correctness (audit fix)", () => {
+  let dir: string;
+  let cssPath: string;
+  const mappingFor = (d: string): MappingConfig => ({
+    id: "test",
+    penFile: join(d, "design.pen"),
+    codeDir: join(d, "code"),
+    codeGlobs: ["**/*.css"],
+    direction: "both",
+    styleFiles: ["styles.css"],
+  });
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "fill-fastpath-"));
+    await mkdir(join(dir, "code"), { recursive: true });
+    cssPath = join(dir, "code", "styles.css");
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("does not cascade: a later diff must not re-replace an earlier diff's output", async () => {
+    // --color-a was #224846 (34 72 70); --color-b was #333333 (51 51 51)
+    await writeFile(cssPath, ":root { --color-a: 34 72 70; --color-b: 51 51 51; }\n");
+    const result = await applyFillChanges(mappingFor(dir), [
+      { nodeId: "a", nodeName: "a", prop: "fill", oldValue: "#224846", newValue: "#333333" },
+      { nodeId: "b", nodeName: "b", prop: "fill", oldValue: "#333333", newValue: "#444444" },
+    ]);
+    const css = await readFile(cssPath, "utf-8");
+    // a goes 34 72 70 -> 51 51 51 and MUST stay there (not get bumped to 68 68 68 by diff b)
+    expect(css).toContain("--color-a: 51 51 51;");
+    expect(css).toContain("--color-b: 68 68 68;");
+    expect(result.filesChanged.length).toBe(1);
+  });
+
+  it("applies rgb() fills (currently classified fast-path-eligible but dropped)", async () => {
+    await writeFile(cssPath, ":root { --color-x: 34 72 70; }\n");
+    const result = await applyFillChanges(mappingFor(dir), [
+      { nodeId: "x", nodeName: "x", prop: "fill", oldValue: "rgb(34, 72, 70)", newValue: "rgb(40, 80, 75)" },
+    ]);
+    const css = await readFile(cssPath, "utf-8");
+    expect(css).toContain("--color-x: 40 80 75;");
+    expect(result.filesChanged).toContain("styles.css");
+  });
+
+  it("rejects invalid-length hex instead of silently producing a wrong RGB", async () => {
+    await writeFile(cssPath, ":root { --color-y: 18 52 5; }\n");
+    const result = await applyFillChanges(mappingFor(dir), [
+      { nodeId: "y", nodeName: "y", prop: "fill", oldValue: "#12345", newValue: "#ffffff" },
+    ]);
+    // #12345 is invalid (5 hex digits) — must be flagged as unconvertible, not parsed to "18 52 5"
+    expect(result.errors.some((e) => /could not convert/i.test(e))).toBe(true);
+    expect(result.filesChanged.length).toBe(0);
+  });
+});
+
+// ── Iteration 1: fill warnings on mixed diff + Claude no-op detection ────────
+
+describe("syncPenToCode — Iteration 1 result-honesty", () => {
+  let dir: string;
+  let mapping: MappingConfig;
+  let settings: Settings;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "ps-iter1-honesty-"));
+    await mkdir(join(dir, "code", "app"), { recursive: true });
+    await writeFile(join(dir, "code", "app.tsx"), "original content");
+
+    mapping = {
+      id: "test",
+      penFile: join(dir, "design.pen"),
+      codeDir: join(dir, "code"),
+      codeGlobs: ["**/*.tsx", "**/*.css"],
+      direction: "both",
+      styleFiles: ["app/globals.css"],
+    };
+
+    settings = {
+      debounceMs: 2000,
+      model: "claude-sonnet-4-6",
+      maxBudgetUsd: 0.5,
+      conflictStrategy: "prompt",
+      stateFile: join(dir, ".state.json"),
+      logLevel: "error",
+    };
+  });
+
+  afterEach(async () => {
+    vi.clearAllMocks();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("mixed diff carries fill warnings into the final result", async () => {
+    // Fill change whose old RGB is absent from CSS → warning.
+    // Text change routes to the executor. Warning must survive into the final result.
+    await writeFile(
+      join(dir, "code", "app", "globals.css"),
+      `:root { --color-other: 1 2 3; }\n`,
+    );
+    await writeFile(
+      join(dir, "design.pen"),
+      JSON.stringify({ children: [
+        { id: "btn1", name: "submitBtn", type: "frame", fill: "#ff0000" },
+        { id: "t1",   name: "title",    type: "text",  content: "new" },
+      ] }),
+    );
+    const previousState: import("../types.js").MappingState = {
+      mappingId: "test",
+      penHash: "old",
+      codeHashes: {},
+      lastSyncTimestamp: Date.now(),
+      lastSyncDirection: "pen-to-code",
+      penSnapshot: {
+        btn1: { name: "submitBtn", type: "frame", fill: "#00ff00" },
+        t1:   { name: "title",    type: "text",  content: "old" },
+      },
+    };
+
+    const fakeExecutor = {
+      run: vi.fn().mockImplementation(async () => {
+        await writeFile(join(dir, "code", "app.tsx"), "updated by claude");
+        return { success: true, stdout: "done", stderr: "", exitCode: 0 };
+      }),
+    };
+
+    const result = await syncPenToCode(mapping, settings, previousState, false, fakeExecutor as any);
+
+    expect(fakeExecutor.run).toHaveBeenCalled();
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.length).toBeGreaterThan(0);
+  });
+
+  it("Claude success with zero file changes and pending diffs is not reported as success", async () => {
+    await writeFile(
+      join(dir, "design.pen"),
+      JSON.stringify({ children: [{ id: "t1", name: "title", type: "text", content: "new title" }] }),
+    );
+    const previousState: import("../types.js").MappingState = {
+      mappingId: "test",
+      penHash: "old",
+      codeHashes: {},
+      lastSyncTimestamp: Date.now(),
+      lastSyncDirection: "pen-to-code",
+      penSnapshot: { t1: { name: "title", type: "text", content: "old title" } },
+    };
+
+    const fakeExecutor = {
+      run: vi.fn().mockResolvedValue({
+        success: true,
+        stdout: "no changes made",
+        stderr: "",
+        exitCode: 0,
+      }),
+    };
+
+    const result = await syncPenToCode(mapping, settings, previousState, false, fakeExecutor as any);
+
+    expect(result.success).toBe(false);
+    expect(fakeExecutor.run).toHaveBeenCalled();
   });
 });
 
@@ -791,5 +946,56 @@ describe("syncPenToCode — Iteration 1 integration", () => {
 
     // Hex fast-path handles fill changes — Claude should NOT be called for fill-only
     expect(mockedRunClaude).not.toHaveBeenCalled();
+  });
+
+  describe("Iteration 4 — provider coherence", () => {
+    beforeEach(() => {
+      mockedRunClaude.mockResolvedValue({
+        success: true, stdout: "done", stderr: "", exitCode: 0,
+      });
+    });
+
+    it("non-claude-cli provider → returns clear error without spawning Claude", async () => {
+      // Set up a pen file with a gradient fill → goes to otherDiffs → would trigger executeClaudeSync
+      await writeFile(
+        mapping.penFile,
+        makePenJson([{ id: "n1", name: "Button", type: "frame", fill: "linear-gradient(#f00, #00f)" }]),
+      );
+
+      const prevState = makePreviousState(
+        makeSnapshot("n1", { name: "Button", type: "frame", fill: "#ff0000" }),
+      );
+
+      // RED: settings.provider is currently ignored — syncPenToCode falls through to executeClaudeSync
+      const result = await syncPenToCode(mapping, { ...settings, provider: "anthropic" }, prevState);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/provider|not supported/i);
+      expect(mockedRunClaude).not.toHaveBeenCalled();
+    });
+
+    it("provider: 'claude-cli' still uses the CLI executor (no regression)", async () => {
+      await writeFile(
+        mapping.penFile,
+        makePenJson([{ id: "n1", name: "Btn", type: "frame", fill: "linear-gradient(#aaa, #bbb)" }]),
+      );
+
+      const prevState = makePreviousState(makeSnapshot("n1", { name: "Btn", fill: "#aaa" }));
+
+      mockedRunClaude.mockImplementationOnce(async () => {
+        await writeFile(join(dir, "code", "app.tsx"), "updated");
+        return { success: true, stdout: "done", stderr: "", exitCode: 0 };
+      });
+
+      const result = await syncPenToCode(
+        mapping,
+        { ...settings, provider: "claude-cli" },
+        prevState,
+      );
+
+      // Claude CLI path: runClaude should have been called
+      expect(mockedRunClaude).toHaveBeenCalledOnce();
+      expect(result.direction).toBe("pen-to-code");
+    });
   });
 });

@@ -545,10 +545,10 @@ describe("runClaude", () => {
       // Need to advance timers to trigger retry delay
       await vi.advanceTimersByTimeAsync(100);
 
-      // Second attempt: tool_timeout (transient)
+      // Second attempt: server_crash (transient)
       const listeners2 = listenersList[1];
       listeners2.get("stderr:data")!(
-        Buffer.from('MCP error: tool "pencil__batch_get" timed out after 30s')
+        Buffer.from("MCP error: Server pencil exited unexpectedly with code 1"),
       );
       listeners2.get("close")!(1);
 
@@ -636,10 +636,14 @@ describe("runClaude", () => {
       const delays: number[] = [];
       const originalSetTimeout = global.setTimeout;
 
-      // Track delay calls
+      // Spy collapses short retry delays to 0ms (so they fire immediately) but preserves
+      // long delays (the 300s hard timeout) at their real fake-time value. This prevents
+      // vi.advanceTimersByTimeAsync(1) from accidentally firing the hard timeout and
+      // resolving an attempt before the test can supply its listeners.
       const setTimeoutSpy = vi.spyOn(global, "setTimeout").mockImplementation(((cb: () => void, delay?: number) => {
-        if (delay) delays.push(delay);
-        return originalSetTimeout(cb, 0);
+        const isRetryDelay = delay !== undefined && delay < 1000;
+        if (isRetryDelay) delays.push(delay);
+        return originalSetTimeout(cb, isRetryDelay ? 0 : delay);
       }) as unknown as typeof setTimeout);
 
       // Attempt 1: fail
@@ -648,7 +652,7 @@ describe("runClaude", () => {
         Buffer.from("MCP error: Failed to connect to server pencil: ECONNREFUSED")
       );
       listeners1.get("close")!(1);
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(1); // fire 0ms retry delay only
 
       // Attempt 2: fail
       const listeners2 = listenersList[1];
@@ -656,7 +660,7 @@ describe("runClaude", () => {
         Buffer.from("MCP error: Failed to connect to server pencil: ECONNREFUSED")
       );
       listeners2.get("close")!(1);
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(1); // fire 0ms retry delay only
 
       // Attempt 3: fail
       const listeners3 = listenersList[2];
@@ -664,7 +668,7 @@ describe("runClaude", () => {
         Buffer.from("MCP error: Failed to connect to server pencil: ECONNREFUSED")
       );
       listeners3.get("close")!(1);
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(1); // fire 0ms retry delay only
 
       // Attempt 4: success
       const listeners4 = listenersList[3];
@@ -737,6 +741,48 @@ describe("runClaude", () => {
       const result = await promise;
       expect(result.success).toBe(false);
       expect(mockSpawn).toHaveBeenCalledTimes(1); // No retry
+    });
+
+    it("Iter 7 — MCP tool_timeout is not retried (terminal, not transient)", async () => {
+      const promise = runClaude({
+        prompt: "test",
+        model: "claude-sonnet-4-6",
+        mcpConfigPath: "/path/to/mcp.json",
+        maxRetries: 3,
+        retryDelayMs: 50,
+      });
+
+      // tool_timeout from an MCP tool hanging
+      listeners.get("stderr:data")!(
+        Buffer.from('MCP error: tool "pencil__batch_get" timed out after 30s'),
+      );
+      listeners.get("close")!(1);
+
+      const result = await promise;
+      expect(result.success).toBe(false);
+      expect(result.mcpError).toBe("tool_timeout");
+      expect(mockSpawn).toHaveBeenCalledTimes(1); // no retry — tool_timeout is terminal
+    });
+
+    it("Iter 7 — SIGKILL escalation timer is cleared on process exit", async () => {
+      const promise = runClaude({ prompt: "test", model: "claude-sonnet-4-6" });
+      const mockProc = mockSpawn.mock.results[0].value as { kill: ReturnType<typeof vi.fn> };
+
+      // Advance 300s to trigger the hard timeout
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(mockProc.kill).toHaveBeenCalledWith("SIGTERM");
+
+      // Process exits after SIGTERM — should clear the SIGKILL timer
+      listeners.get("close")!(1);
+      await promise;
+      mockProc.kill.mockClear();
+
+      // Advance past the 5s SIGKILL escalation window
+      await vi.advanceTimersByTimeAsync(6_000);
+
+      // SIGKILL must NOT fire because the process already exited
+      const sigkillCalls = mockProc.kill.mock.calls.filter((c) => c[0] === "SIGKILL");
+      expect(sigkillCalls).toHaveLength(0);
     });
   });
 });

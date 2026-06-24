@@ -1,5 +1,6 @@
 import { readFile, access, readdir } from "node:fs/promises";
 import { resolve, dirname, join, relative } from "node:path";
+import { z } from "zod";
 import type {
   PencilSyncConfig,
   MappingConfig,
@@ -13,6 +14,33 @@ import { DEFAULT_SETTINGS } from "./types.js";
 const VALID_DIRECTIONS: SyncDirection[] = ["both", "pen-to-code", "code-to-pen"];
 import { log } from "./logger.js";
 import { validatePathWithin } from "./utils.js";
+
+const MappingInputSchema = z
+  .object({
+    id: z.string({ required_error: "mapping.id is required" }),
+    penFile: z.string({ required_error: "mapping.penFile is required" }),
+    codeDir: z.string({ required_error: "mapping.codeDir is required" }),
+    codeGlobs: z.array(z.string(), {
+      required_error: "mapping.codeGlobs is required",
+      invalid_type_error: "mapping.codeGlobs must be an array of strings",
+    }),
+    direction: z.enum(["both", "pen-to-code", "code-to-pen"], {
+      errorMap: () => ({
+        message: "mapping.direction must be 'both', 'pen-to-code', or 'code-to-pen'",
+      }),
+    }),
+  })
+  .passthrough();
+
+const ConfigInputSchema = z.object({
+  version: z.number().optional(),
+  mappings: z
+    .array(MappingInputSchema, {
+      required_error: "Config.mappings is required.",
+      invalid_type_error: "Config.mappings must be an array.",
+    })
+    .min(1, "Config must have at least one mapping."),
+});
 
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
@@ -236,52 +264,94 @@ export async function loadConfig(
   const raw = await readFile(resolvedPath, "utf-8");
   // Strip JSONC comments while preserving string contents
   // Strategy: match strings first, preserve them; then match comments and remove them
-  const cleaned = raw.replace(
+  const withoutComments = raw.replace(
     /"(?:[^"\\]|\\.)*"|\/\/.*?(?=\n|$)|\/\*[\s\S]*?\*\//gm,
-    (match) => {
-      // If match starts with a quote, it's a string — preserve it
-      if (match.startsWith('"')) {
-        return match;
-      }
-      // Otherwise it's a comment — remove it
-      return "";
-    },
+    (match) => (match.startsWith('"') ? match : ""),
   );
-  const parsed = JSON.parse(cleaned) as Partial<PencilSyncConfig>;
+  // Strip trailing commas before } or ] (not inside strings)
+  const cleaned = withoutComments.replace(
+    /"(?:[^"\\]|\\.)*"|,(\s*[}\]])/gm,
+    (match, g1) => (match.startsWith('"') ? match : g1 as string),
+  );
+  const raw_parsed = JSON.parse(cleaned) as unknown;
 
-  if (!parsed.mappings || parsed.mappings.length === 0) {
-    throw new Error("Config must have at least one mapping.");
+  let parsed: z.infer<typeof ConfigInputSchema>;
+  try {
+    parsed = ConfigInputSchema.parse(raw_parsed);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const issues = err.issues ?? (err as { errors?: typeof err.issues }).errors ?? [];
+      const msg = issues.map((e) => `${e.path.join(".") || "config"}: ${e.message}`).join("; ");
+      throw new Error(`Config validation failed: ${msg}`);
+    }
+    throw err;
   }
 
   const configDir = dirname(resolvedPath);
-  const settings: Settings = safeMerge(DEFAULT_SETTINGS, parsed.settings);
+  const rawConfig = raw_parsed as Record<string, unknown>;
+  const settings: Settings = safeMerge(DEFAULT_SETTINGS, rawConfig.settings as Partial<Settings>);
 
   // Expand ${VAR_NAME} in apiKey, or auto-populate from well-known env vars
   if (settings.apiKey?.startsWith("${") && settings.apiKey.endsWith("}")) {
     const varName = settings.apiKey.slice(2, -1);
-    settings.apiKey = process.env[varName];
-  } else if (!settings.apiKey && settings.aiProvider) {
-    const envMap: Record<string, string> = {
-      anthropic: "ANTHROPIC_API_KEY",
-      "openai-compatible": "OPENAI_API_KEY",
-      google: "GOOGLE_API_KEY",
-    };
-    const varName = envMap[settings.aiProvider];
-    if (varName) settings.apiKey = process.env[varName];
+    const envValue = process.env[varName];
+    if (envValue === undefined) {
+      throw new Error(
+        `Environment variable '${varName}' referenced in apiKey is not set. ` +
+          `Set it with: export ${varName}=<your-api-key>`,
+      );
+    }
+    settings.apiKey = envValue;
+  } else if (!settings.apiKey) {
+    const effectiveProvider = settings.provider ?? settings.aiProvider;
+    if (effectiveProvider && effectiveProvider !== "claude-cli") {
+      const envMap: Record<string, string> = {
+        anthropic: "ANTHROPIC_API_KEY",
+        "openai-compatible": "OPENAI_API_KEY",
+        google: "GOOGLE_API_KEY",
+      };
+      const varName = envMap[effectiveProvider];
+      if (varName) settings.apiKey = process.env[varName];
+    }
   }
 
-  // Warn about common MiniMax domain mismatch: minimax.chat (China) returns 401 for a valid key;
-  // the international domain is minimaxi.chat (double-i)
-  if (
-    settings.apiBaseUrl &&
-    settings.apiBaseUrl.includes("minimax.chat") &&
-    !settings.apiBaseUrl.includes("minimaxi.chat")
-  ) {
-    console.warn(
-      "[pencil-sync] WARNING: apiBaseUrl looks like the MiniMax China domain (minimax.chat). " +
-        "For international accounts use api.minimaxi.chat/v1 (double-i). " +
-        "The China domain returns '401 invalid api key' for valid international keys.",
-    );
+  if (settings.apiBaseUrl) {
+    try {
+      const parsedUrl = new URL(settings.apiBaseUrl);
+      if (parsedUrl.protocol !== "https:") {
+        console.warn(
+          `[pencil-sync] WARNING: apiBaseUrl "${settings.apiBaseUrl}" uses a non-https protocol. ` +
+            "Using http:// sends API keys in cleartext.",
+        );
+      }
+      const host = parsedUrl.hostname;
+      if (
+        host === "localhost" ||
+        host === "127.0.0.1" ||
+        host === "::1" ||
+        host.startsWith("192.168.") ||
+        host.startsWith("10.") ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+      ) {
+        console.warn(
+          `[pencil-sync] WARNING: apiBaseUrl "${settings.apiBaseUrl}" points to localhost or an internal network address.`,
+        );
+      }
+    } catch {
+      // Invalid URL — let downstream validation surface the error
+    }
+    // Warn about common MiniMax domain mismatch: minimax.chat (China) returns 401 for a valid key;
+    // the international domain is minimaxi.chat (double-i)
+    if (
+      settings.apiBaseUrl.includes("minimax.chat") &&
+      !settings.apiBaseUrl.includes("minimaxi.chat")
+    ) {
+      console.warn(
+        "[pencil-sync] WARNING: apiBaseUrl looks like the MiniMax China domain (minimax.chat). " +
+          "For international accounts use api.minimaxi.chat/v1 (double-i). " +
+          "The China domain returns '401 invalid api key' for valid international keys.",
+      );
+    }
   }
 
   settings.stateFile = validatePathWithin(configDir, settings.stateFile);

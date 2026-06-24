@@ -21,8 +21,8 @@ function ok(data: unknown): { content: [{ type: "text"; text: string }] } {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
 }
 
-function err(message: string): { content: [{ type: "text"; text: string }] } {
-  return { content: [{ type: "text", text: `Error: ${message}` }] };
+function err(message: string): { content: [{ type: "text"; text: string }]; isError: true } {
+  return { content: [{ type: "text", text: `Error: ${message}` }], isError: true };
 }
 
 async function loadConfigAndState(configPath: string, mappingId: string) {
@@ -162,6 +162,9 @@ export function createMcpServer(): McpServer {
       try {
         const { mapping } = await loadConfigAndState(configPath, mappingId);
         const fillResult = await applyFillChanges(mapping, fills as PenDiffEntry[]);
+        if (fillResult.filesChanged.length === 0 && fillResult.errors.length > 0) {
+          return err(fillResult.errors.join("; "));
+        }
         return ok({ filesChanged: fillResult.filesChanged, errors: fillResult.errors });
       } catch (e) {
         return err(extractErrorMessage(e));
@@ -202,7 +205,15 @@ export function createMcpServer(): McpServer {
     async ({ configPath, mappingId, direction, filesChanged }) => {
       try {
         const { mapping, store } = await loadConfigAndState(configPath, mappingId);
-        await store.updateMappingState(mapping, direction as SyncDirection);
+        // Snapshot the current pen file so pencil_diff_design has a baseline for the next run
+        let penSnapshot: ReturnType<typeof snapshotPenFile> | undefined;
+        try {
+          const penRaw = await readFile(mapping.penFile, "utf-8");
+          penSnapshot = snapshotPenFile(mapping.penFile, penRaw);
+        } catch {
+          // Pen file unreadable — update state without snapshot; diff_design will see full baseline on next read
+        }
+        await store.updateMappingState(mapping, direction as SyncDirection, penSnapshot);
         const lastRun: SyncResult = {
           success: true,
           direction: direction as SyncDirection,
@@ -224,6 +235,19 @@ export async function startMcpServer(): Promise<void> {
   setMcpMode(true);
   const server = createMcpServer();
   const transport = new StdioServerTransport();
+
+  // Exit when the MCP client disconnects (stdin closes). Without this, the
+  // node process is orphaned after the parent Claude Code session ends and
+  // spins at 100% CPU indefinitely on the kqueue event loop.
+  process.stdin.on("close", () => {
+    process.stderr.write("pencil-sync-mcp: stdin closed, exiting\n");
+    process.exit(0);
+  });
+  process.stdin.on("end", () => {
+    process.stderr.write("pencil-sync-mcp: stdin ended, exiting\n");
+    process.exit(0);
+  });
+
   await server.connect(transport);
 }
 

@@ -131,38 +131,54 @@ export function diffPenSnapshots(
 ): PenDiffEntry[] {
   const diffs: PenDiffEntry[] = [];
 
-  for (const [nodeId, newProps] of Object.entries(newSnap)) {
+  // Iterate the union so deletions (present in old, absent in new) are detected,
+  // not just modifications. A cleared/removed prop is emitted with newValue "".
+  const nodeIds = new Set([...Object.keys(oldSnap), ...Object.keys(newSnap)]);
+
+  for (const nodeId of nodeIds) {
     const oldProps = oldSnap[nodeId];
+    const newProps = newSnap[nodeId];
 
     if (TOKEN_KEYS.has(nodeId)) {
-      // Design token bucket — diff every key, not just TRACKED_PROPS
-      if (!oldProps) continue; // no previous token snapshot — skip
-      for (const [tokenKey, newVal] of Object.entries(newProps)) {
+      // Design token bucket — diff every key, not just TRACKED_PROPS.
+      // Skip first-ever token snapshot (no prior bucket) to avoid flooding the
+      // initial sync; once a bucket exists, detect added/changed/removed keys.
+      if (!oldProps) continue;
+      const newTokens = newProps ?? {};
+      const tokenKeys = new Set([...Object.keys(oldProps), ...Object.keys(newTokens)]);
+      for (const tokenKey of tokenKeys) {
         const oldVal = oldProps[tokenKey];
-        if (oldVal !== undefined && String(oldVal) !== String(newVal)) {
-          diffs.push({ nodeId, nodeName: nodeId, prop: tokenKey, oldValue: oldVal, newValue: newVal });
-        }
-        if (oldVal === undefined) {
-          // New token added — emit diff with empty old value
+        const newVal = newTokens[tokenKey];
+        if (oldVal === undefined && newVal !== undefined) {
           diffs.push({ nodeId, nodeName: nodeId, prop: tokenKey, oldValue: "", newValue: newVal });
+        } else if (oldVal !== undefined && newVal === undefined) {
+          diffs.push({ nodeId, nodeName: nodeId, prop: tokenKey, oldValue: oldVal, newValue: "" });
+        } else if (oldVal !== undefined && newVal !== undefined && String(oldVal) !== String(newVal)) {
+          diffs.push({ nodeId, nodeName: nodeId, prop: tokenKey, oldValue: oldVal, newValue: newVal });
         }
       }
       continue;
     }
 
-    if (!oldProps) continue; // new node — skip for now
+    // Brand-new node (absent from old snapshot): intentionally skipped — generating
+    // code for a wholly new design element is out of scope for the diff path.
+    // See docs/AUDIT-deep-bug-hunt.md.
+    if (!oldProps) continue;
+
+    const nodeName = String((newProps ?? oldProps).name ?? nodeId);
 
     for (const prop of TRACKED_PROPS) {
       const oldVal = oldProps[prop];
-      const newVal = newProps[prop];
-      if (oldVal !== undefined && newVal !== undefined && String(oldVal) !== String(newVal)) {
-        diffs.push({
-          nodeId,
-          nodeName: String(newProps.name ?? nodeId),
-          prop,
-          oldValue: oldVal,
-          newValue: newVal,
-        });
+      const newVal = newProps ? newProps[prop] : undefined;
+      if (oldVal === undefined && newVal === undefined) continue;
+      if (oldVal === undefined && newVal !== undefined) {
+        // Prop newly added on an existing node
+        diffs.push({ nodeId, nodeName, prop, oldValue: "", newValue: newVal });
+      } else if (oldVal !== undefined && newVal === undefined) {
+        // Prop cleared, or whole node deleted (newProps absent)
+        diffs.push({ nodeId, nodeName, prop, oldValue: oldVal, newValue: "" });
+      } else if (oldVal !== undefined && newVal !== undefined && String(oldVal) !== String(newVal)) {
+        diffs.push({ nodeId, nodeName, prop, oldValue: oldVal, newValue: newVal });
       }
     }
   }

@@ -7,6 +7,7 @@ import { detectConflict, isConflict } from "./conflict-detector.js";
 import { syncPenToCode } from "./pen-to-code.js";
 import { syncCodeToPen } from "./code-to-pen.js";
 import { estimateCost, estimateInputTokens, MODEL_PRICING } from "./claude-runner.js";
+import { hashCodeDir, diffHashes } from "./state-store.js";
 import { type Executor, localClaudeExecutor } from "./executor.js";
 import type { PenReader } from "./pen-reader.js";
 import { JsonPenReader } from "./pen-reader.js";
@@ -151,6 +152,16 @@ export class SyncEngine {
       let result: SyncResult;
 
       if (manualDirection) {
+        // Guard: if the mapping is unidirectional, block a manual sync in the forbidden direction.
+        if (mapping.direction !== "both" && manualDirection !== mapping.direction) {
+          return {
+            success: false,
+            direction: mapping.direction,
+            mappingId: mapping.id,
+            filesChanged: [],
+            error: `Manual sync direction "${manualDirection}" is not allowed for mapping "${mapping.id}" (authoritative direction: "${mapping.direction}"). Use direction "${mapping.direction}" or set mapping.direction to "both".`,
+          };
+        }
         result = await this.executeSyncDirection(mapping, manualDirection, conflict, previousState, dryRun);
       } else if (triggerDirection === "pen-changed") {
         if (mapping.direction === "code-to-pen") {
@@ -321,6 +332,9 @@ export class SyncEngine {
       };
     }
 
+    // Snapshot hashes before Claude runs so we can verify actual changes afterwards
+    const hashesBeforeMerge = await hashCodeDir(mapping.codeDir, mapping.codeGlobs);
+
     const result = await this.executor.run({
       prompt,
       model: this.config.settings.model,
@@ -342,11 +356,26 @@ export class SyncEngine {
       };
     }
 
+    // Verify that Claude actually made at least one change; otherwise the conflict is unresolved
+    const hashesAfterMerge = await hashCodeDir(mapping.codeDir, mapping.codeGlobs);
+    const actualChangedFiles = diffHashes(hashesBeforeMerge, hashesAfterMerge);
+
+    if (actualChangedFiles.length === 0) {
+      return {
+        success: false,
+        direction: "both",
+        mappingId: mapping.id,
+        filesChanged: [],
+        error: "Auto-merge completed but no file changes were detected — conflict unresolved.",
+        tokenUsage: result.tokenUsage,
+      };
+    }
+
     return {
       success: true,
       direction: "both",
       mappingId: mapping.id,
-      filesChanged: [mapping.penFile, ...conflict.changedCodeFiles],
+      filesChanged: actualChangedFiles,
       tokenUsage: result.tokenUsage,
     };
   }

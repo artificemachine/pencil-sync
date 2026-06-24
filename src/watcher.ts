@@ -12,7 +12,7 @@ export class Watcher {
   private debounceTimers = new Map<string, NodeJS.Timeout>();
   private engine: SyncEngine;
   private pendingChanges = new Map<string, NodeJS.Timeout>();
-  private inFlightSyncs = new Set<string>();
+  private inFlightSyncs = new Map<string, Promise<void>>();
 
   constructor(
     private config: PencilSyncConfig,
@@ -160,26 +160,27 @@ export class Watcher {
 
       log.info(`Change detected (${trigger}) for mapping "${mapping.id}"`);
 
-      this.inFlightSyncs.add(mapping.id);
-
-      try {
-        const result = await this.engine.syncMapping(mapping, trigger);
-        if (result.success) {
-          if (result.filesChanged.length > 0) {
-            log.success(
-              `Sync complete: ${result.filesChanged.length} files updated`,
-            );
+      const syncPromise = (async () => {
+        try {
+          const result = await this.engine.syncMapping(mapping, trigger);
+          if (result.success) {
+            if (result.filesChanged.length > 0) {
+              log.success(
+                `Sync complete: ${result.filesChanged.length} files updated`,
+              );
+            } else {
+              log.info("Sync complete: no changes needed");
+            }
           } else {
-            log.info("Sync complete: no changes needed");
+            log.error(`Sync failed: ${result.error ?? "unknown error"}`);
           }
-        } else {
-          log.error(`Sync failed: ${result.error ?? "unknown error"}`);
+        } catch (err) {
+          log.error(`Sync error: ${extractErrorMessage(err)}`);
+        } finally {
+          this.inFlightSyncs.delete(mapping.id);
         }
-      } catch (err) {
-        log.error(`Sync error: ${extractErrorMessage(err)}`);
-      } finally {
-        this.inFlightSyncs.delete(mapping.id);
-      }
+      })();
+      this.inFlightSyncs.set(mapping.id, syncPromise);
     }, debounceMs);
 
     this.debounceTimers.set(key, timer);
@@ -195,6 +196,9 @@ export class Watcher {
       clearTimeout(timer);
     }
     this.pendingChanges.clear();
+
+    // Await any in-flight sync before closing so callers see a clean stop
+    await Promise.allSettled(this.inFlightSyncs.values());
 
     await Promise.all(this.watchers.map((w) => w.close()));
     this.watchers = [];

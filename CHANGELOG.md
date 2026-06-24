@@ -124,3 +124,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-19: fix(cost-labels): clarify costUsd is an API-rate estimate in budget warnings and debug logs; actual billing depends on plan
 - 2026-06-19: feat(code-to-pen): add explicit provider field — settings.provider="claude-cli" forces subscription executor even when aiProvider is also set
 - 2026-06-19: fix(config): warn at load time when apiBaseUrl uses minimax.chat (China domain) instead of minimaxi.chat (international) to prevent misleading 401 errors
+- 2026-06-24: fix(pen-snapshot): diffPenSnapshots now detects added/cleared props, whole-node deletions, and removed tokens on existing nodes (brand-new nodes still intentionally skipped) [audit]
+- 2026-06-24: fix(pen-to-code): hexToRgbChannels parses rgb()/rgba() and rejects invalid-length hex instead of silently coercing a wrong RGB [audit]
+- 2026-06-24: fix(pen-to-code): applyFillChanges applies color replacements in a single keyed pass to stop chained diffs from corrupting each other (#224846→#333333 then #333333→#444444) [audit]
+- 2026-06-24: fix(pen-to-code): surfaced fill zero-match warnings in mixed-diff results and treat Claude no-op (success + zero files changed) as failure [audit iter-1]
+- 2026-06-24: fix(pencil-mcp-client): batchGet/batchDesign now throw on isError and non-JSON instead of swallowing errors; fix(code-to-pen): syncCodeToPenDirect returns failure on unreadable .pen or no-op after batch_design [audit iter-3]
+- 2026-06-24: fix(provider): honor settings.provider in runner creation and env-key resolution; pen-to-code errors clearly on non-claude-cli provider [audit iter-4]
+- 2026-06-24: fix(ai-runners): add claude-haiku-4-5 alias to pricing table; pass systemInstruction to Google getGenerativeModel; warn on OpenAI finish_reason:length truncation; add SSRF guard for non-https and localhost apiBaseUrl [audit iter-10]

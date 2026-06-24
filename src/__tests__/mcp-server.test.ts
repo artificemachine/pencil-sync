@@ -18,7 +18,7 @@ vi.mock("@modelcontextprotocol/sdk/server/stdio.js", () => ({
 const { createMcpServer } = await import("../mcp-server.js");
 
 // Helper: invoke a registered MCP tool by name with params
-async function callTool(toolName: string, params: Record<string, unknown>): Promise<{ content: Array<{ type: string; text: string }> }> {
+async function callTool(toolName: string, params: Record<string, unknown>): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
   const server = createMcpServer();
   const tools = (server as any)._registeredTools as Record<string, { handler: (p: unknown, e: unknown) => Promise<unknown> }>;
   const tool = tools[toolName];
@@ -452,7 +452,7 @@ describe("mcp-server", () => {
       expect(Array.isArray(parsed.filesChanged)).toBe(true);
     });
 
-    it("returns empty filesChanged with errors when no CSS file is configured", async () => {
+    it("returns isError when no CSS file is configured (zero-match failure)", async () => {
       const cfg = makeConfig(dir);
       const configPath = join(dir, "pencil-sync.config.json");
       await writeFile(configPath, JSON.stringify(cfg));
@@ -462,12 +462,11 @@ describe("mcp-server", () => {
         mappingId: "test-mapping",
         fills: [{ nodeId: "n1", nodeName: "btn", prop: "fill", oldValue: "#000000", newValue: "#ffffff" }],
       });
-      const parsed = JSON.parse(result.content[0].text);
-      expect(Array.isArray(parsed.errors)).toBe(true);
-      expect(parsed.errors.length).toBeGreaterThan(0);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(/error/i);
     });
 
-    it("chaos: returns structured result (not throw) for malformed hex values", async () => {
+    it("chaos: returns isError (not throw) for malformed hex values", async () => {
       const cfg = {
         ...makeConfig(dir),
         mappings: [{
@@ -488,11 +487,9 @@ describe("mcp-server", () => {
         mappingId: "test-mapping",
         fills: [{ nodeId: "n1", nodeName: "btn", prop: "fill", oldValue: "notahex", newValue: "alsowrong" }],
       });
-      // Should not throw — returns structured result
+      // Invalid hex → errors populated, filesChanged empty → isError
       expect(result.content[0].type).toBe("text");
-      const parsed = JSON.parse(result.content[0].text);
-      expect(parsed).toHaveProperty("filesChanged");
-      expect(parsed).toHaveProperty("errors");
+      expect(result.isError).toBe(true);
     });
   });
 
@@ -656,6 +653,50 @@ describe("mcp-server", () => {
     });
   });
 
+  describe("Iteration 2 — isError signaling", () => {
+    let dir: string;
+
+    beforeEach(async () => {
+      dir = await mkdtemp(join(tmpdir(), "pencil-mcp-iserror-"));
+      await mkdir(join(dir, "code"), { recursive: true });
+      await writeFile(join(dir, "design.pen"), JSON.stringify({ children: [] }));
+    });
+
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it("err() result carries isError true", async () => {
+      const result = await callTool("pencil_get_config", {
+        configPath: "/nonexistent/config-that-does-not-exist.json",
+      });
+      expect(result.isError).toBe(true);
+    });
+
+    it("apply_fill_changes with no matched declarations returns isError", async () => {
+      // No styleFiles → no CSS file → errors populated, filesChanged empty → isError
+      const cfg = makeConfig(dir);
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+
+      const result = await callTool("pencil_apply_fill_changes", {
+        configPath,
+        mappingId: "test-mapping",
+        fills: [{ nodeId: "n1", nodeName: "btn", prop: "fill", oldValue: "#000000", newValue: "#ffffff" }],
+      });
+      expect(result.isError).toBe(true);
+    });
+
+    it("successful tool result does not carry isError", async () => {
+      const cfg = makeConfig(dir);
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify(cfg));
+
+      const result = await callTool("pencil_get_config", { configPath });
+      expect(result.isError).toBeFalsy();
+    });
+  });
+
   describe("E2E — full host agent workflow", () => {
     it("get config → diff design → build prompt → record sync → state persisted", async () => {
       const { readFile: rf } = await import("node:fs/promises");
@@ -708,6 +749,39 @@ describe("mcp-server", () => {
         expect(state.mappings["test-mapping"].lastSyncDirection).toBe("pen-to-code");
       } finally {
         await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("Iter 9 — pencil_record_sync persists penSnapshot", () => {
+    it("penSnapshot is stored in state so next pencil_diff_design has a baseline", async () => {
+      const { readFile: rf } = await import("node:fs/promises");
+      const dir2 = await mkdtemp(join(tmpdir(), "pencil-mcp-snap-"));
+      try {
+        await mkdir(join(dir2, "code"), { recursive: true });
+        // Write a non-trivial pen file so snapshotPenFile produces a non-empty snapshot
+        await writeFile(join(dir2, "design.pen"), JSON.stringify({
+          children: [{ id: "n1", name: "Title", type: "text", content: "Hello" }],
+        }));
+
+        const cfg = makeConfig(dir2);
+        const configPath = join(dir2, "pencil-sync.config.json");
+        await writeFile(configPath, JSON.stringify(cfg));
+
+        await callTool("pencil_record_sync", {
+          configPath,
+          mappingId: "test-mapping",
+          direction: "pen-to-code",
+          filesChanged: [],
+        });
+
+        const rawState = await rf(join(dir2, ".state.json"), "utf-8");
+        const state = JSON.parse(rawState);
+        // penSnapshot must be populated — otherwise diff_design sees an empty baseline
+        expect(state.mappings["test-mapping"].penSnapshot).toBeTruthy();
+        expect(Object.keys(state.mappings["test-mapping"].penSnapshot).length).toBeGreaterThan(0);
+      } finally {
+        await rm(dir2, { recursive: true, force: true });
       }
     });
   });

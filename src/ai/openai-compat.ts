@@ -32,6 +32,13 @@ export class OpenAICompatRunner implements AIRunner {
       ],
     });
 
+    const finishReason = response.choices[0]?.finish_reason;
+    if (finishReason === "length") {
+      console.warn(
+        "[pencil-sync] Response was truncated (finish_reason: length). Consider increasing max_tokens.",
+      );
+    }
+
     const text = response.choices[0]?.message?.content ?? "";
     const usage: TokenUsage | undefined = response.usage
       ? {

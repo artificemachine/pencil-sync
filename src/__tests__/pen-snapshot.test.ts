@@ -163,6 +163,61 @@ describe("diffPenSnapshots", () => {
   });
 });
 
+describe("diffPenSnapshots — add/remove/clear completeness (audit fix)", () => {
+  it("detects a cleared prop on an existing node (content removed)", () => {
+    const oldSnap = { t1: { name: "title", type: "text", content: "hello" } };
+    const newSnap = { t1: { name: "title", type: "text" } };
+    const diffs = diffPenSnapshots(oldSnap, newSnap);
+    const d = diffs.find((x) => x.prop === "content");
+    expect(d).toBeDefined();
+    expect(d!.oldValue).toBe("hello");
+    expect(d!.newValue).toBe("");
+  });
+
+  it("detects a newly-added prop on an existing node (fontSize added)", () => {
+    const oldSnap = { t1: { name: "title", type: "text", content: "hi" } };
+    const newSnap = { t1: { name: "title", type: "text", content: "hi", fontSize: 32 } };
+    const diffs = diffPenSnapshots(oldSnap, newSnap);
+    const d = diffs.find((x) => x.prop === "fontSize");
+    expect(d).toBeDefined();
+    expect(d!.oldValue).toBe("");
+    expect(d!.newValue).toBe(32);
+  });
+
+  it("detects a whole-node deletion (existing node absent from new snapshot)", () => {
+    const oldSnap = {
+      btn1: { name: "submitBtn", type: "frame", fill: "#ff0000" },
+      cta: { name: "cta", type: "text", content: "Buy" },
+    };
+    const newSnap = { btn1: { name: "submitBtn", type: "frame", fill: "#ff0000" } };
+    const diffs = diffPenSnapshots(oldSnap, newSnap);
+    const d = diffs.find((x) => x.nodeId === "cta" && x.prop === "content");
+    expect(d).toBeDefined();
+    expect(d!.oldValue).toBe("Buy");
+    expect(d!.newValue).toBe("");
+  });
+
+  it("detects a removed design token in an existing token bucket", () => {
+    const oldSnap = { "/themes": { "light.primary": "#111", "light.accent": "#222" } };
+    const newSnap = { "/themes": { "light.primary": "#111" } };
+    const diffs = diffPenSnapshots(oldSnap, newSnap);
+    const d = diffs.find((x) => x.prop === "light.accent");
+    expect(d).toBeDefined();
+    expect(d!.oldValue).toBe("#222");
+    expect(d!.newValue).toBe("");
+  });
+
+  it("still skips brand-new nodes (unchanged behavior, see AUDIT-deep-bug-hunt)", () => {
+    const oldSnap = { btn1: { name: "b", type: "frame", fill: "#fff" } };
+    const newSnap = {
+      btn1: { name: "b", type: "frame", fill: "#fff" },
+      btn2: { name: "new", type: "frame", fill: "#000" },
+    };
+    const diffs = diffPenSnapshots(oldSnap, newSnap);
+    expect(diffs.some((d) => d.nodeId === "btn2")).toBe(false);
+  });
+});
+
 // ── Iteration 1: real-schema complex value tests ─────────────────────────────
 
 describe("snapshotPenFile — smoke (real-schema fixture)", () => {
