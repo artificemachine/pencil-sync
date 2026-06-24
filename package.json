@@ -1,12 +1,12 @@
 {
   "name": "pencil-sync",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Bidirectional sync between .pen design files and frontend code via Claude CLI",
   "license": "Apache-2.0",
   "author": "pencil-sync contributors",
   "repository": {
     "type": "git",
-    "url": "https://github.com/celstnblacc/pencil-sync.git"
+    "url": "git+https://github.com/artificemachine/pencil-sync.git"
   },
   "keywords": [
     "pencil",
