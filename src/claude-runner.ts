@@ -76,13 +76,13 @@ export function detectMcpError(stderr: string): McpErrorType | undefined {
 }
 
 export function isTransientMcpError(mcpError: McpErrorType | undefined): boolean {
-  // Transient errors that should be retried:
-  // - server_unavailable: Server might come back up
-  // - tool_timeout: Might succeed on retry
-  // - server_crash: Server might restart and work
-  // Non-transient errors:
+  // Transient errors (server-level issues that may resolve on retry):
+  // - server_unavailable: Server may come back
+  // - server_crash: Server may restart
+  // Non-transient (terminal) — do not retry:
+  // - tool_timeout: The MCP server is unresponsive; retrying wastes another 5+ min
   // - malformed_response: Indicates a bug, won't fix itself
-  return mcpError === "server_unavailable" || mcpError === "tool_timeout" || mcpError === "server_crash";
+  return mcpError === "server_unavailable" || mcpError === "server_crash";
 }
 
 const CLAUDE_TIMEOUT_MS = 300_000; // 5 min max
@@ -125,6 +125,7 @@ async function runOnce(options: ClaudeRunOptions): Promise<ClaudeRunResult> {
 
   return new Promise((resolve) => {
     let resolved = false;
+    let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
 
     const proc = spawn("claude", args, {
       cwd: cwd ?? process.cwd(),
@@ -140,11 +141,13 @@ async function runOnce(options: ClaudeRunOptions): Promise<ClaudeRunResult> {
     const timeoutTimer = setTimeout(() => {
       if (!resolved) {
         log.error(`Claude CLI timed out after ${CLAUDE_TIMEOUT_MS / 1000}s, killing process`);
-        finish(1, true); // Pass timeout flag
         proc.kill("SIGTERM");
-        setTimeout(() => {
+        // Set sigkillTimer BEFORE calling finish() so finish() can clearTimeout() it if the
+        // process exits before the escalation window elapses.
+        sigkillTimer = setTimeout(() => {
           try { proc.kill("SIGKILL"); } catch { /* noop */ }
         }, 5000);
+        finish(1, true); // Pass timeout flag — now clears sigkillTimer correctly
       }
     }, CLAUDE_TIMEOUT_MS);
 
@@ -152,6 +155,7 @@ async function runOnce(options: ClaudeRunOptions): Promise<ClaudeRunResult> {
       if (resolved) return;
       resolved = true;
       clearTimeout(timeoutTimer);
+      clearTimeout(sigkillTimer);
 
       // Handle timeout error with explicit stderr message
       const finalStderr = timeoutError ? `Claude CLI timed out after ${CLAUDE_TIMEOUT_MS / 1000}s` : stderr;

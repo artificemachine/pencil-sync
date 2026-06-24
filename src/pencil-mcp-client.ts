@@ -80,21 +80,35 @@ export class PencilMcpClient {
 
     const result = await this.client.callTool({ name: "batch_get", arguments: args });
 
+    if ((result as { isError?: boolean }).isError) {
+      const errText =
+        (result.content as Array<{ type: string; text: string }>).find((c) => c.type === "text")?.text ??
+        "unknown error";
+      throw new Error(`batch_get failed: ${errText}`);
+    }
+
     const content = result.content as Array<{ type: string; text: string }>;
     const text = content.find((c) => c.type === "text")?.text ?? "{}";
 
     try {
       return JSON.parse(text) as PencilNodeData;
     } catch {
-      log.warn("batch_get returned non-JSON response — returning empty state");
-      return {};
+      throw new Error(`batch_get returned non-JSON response: ${text.slice(0, 120)}`);
     }
   }
 
   async batchDesign(script: string): Promise<void> {
     if (!this.client) throw new Error("PencilMcpClient not connected — call connect() first");
 
-    await this.client.callTool({ name: "batch_design", arguments: { script } });
+    const result = await this.client.callTool({ name: "batch_design", arguments: { script } });
+
+    if ((result as { isError?: boolean }).isError) {
+      const errText =
+        (result.content as Array<{ type: string; text: string }>).find((c) => c.type === "text")?.text ??
+        "unknown error";
+      throw new Error(`batch_design failed: ${errText}`);
+    }
+
     log.debug("batch_design script executed");
   }
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -378,7 +378,7 @@ describe("loadConfig", () => {
     }));
 
     await expect(loadConfig(configPath)).rejects.toThrow(
-      /Invalid direction.*Must be one of: both, pen-to-code, code-to-pen/,
+      /direction.*(invalid|must be|expected|both.*pen-to-code|pen-to-code.*code)/i,
     );
   });
 
@@ -593,5 +593,194 @@ describe("loadConfig", () => {
 
     const config = await loadConfig(configPath);
     expect(config.mappings[0].text).toBe('She said "hello // world"');
+  });
+
+  describe("Iteration 4 — env-key resolution for settings.provider", () => {
+    const MAPPING = {
+      id: "main",
+      penFile: "design.pen",
+      codeDir: "code",
+      codeGlobs: ["**/*.tsx"],
+      direction: "both",
+    };
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("env apiKey auto-populated from provider field when aiProvider unset", async () => {
+      // RED: currently only checks settings.aiProvider — settings.provider is ignored
+      vi.stubEnv("ANTHROPIC_API_KEY", "env-test-key-anthropic");
+
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify({
+        version: 1,
+        mappings: [MAPPING],
+        settings: { provider: "anthropic" },
+      }));
+
+      const config = await loadConfig(configPath);
+      expect(config.settings.apiKey).toBe("env-test-key-anthropic");
+    });
+
+    it("provider field does not override an explicit apiKey", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "should-not-be-used");
+
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify({
+        version: 1,
+        mappings: [MAPPING],
+        settings: { provider: "anthropic", apiKey: "explicit-key" },
+      }));
+
+      const config = await loadConfig(configPath);
+      expect(config.settings.apiKey).toBe("explicit-key");
+    });
+  });
+
+  describe("Iteration 5 — config validation & parsing hardening", () => {
+    const VALID_MAPPING = {
+      id: "main",
+      penFile: "design.pen",
+      codeDir: "code",
+      codeGlobs: ["**/*.tsx"],
+      direction: "both",
+    };
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("smoke: valid config still loads after validation", async () => {
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify({
+        version: 1,
+        mappings: [VALID_MAPPING],
+      }));
+      const config = await loadConfig(configPath);
+      expect(config.mappings).toHaveLength(1);
+    });
+
+    it("mapping missing codeGlobs → descriptive validation error (not TypeError)", async () => {
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify({
+        version: 1,
+        mappings: [{ id: "main", penFile: "design.pen", codeDir: "code", direction: "both" }],
+      }));
+      await expect(loadConfig(configPath)).rejects.toThrow(/codeGlobs/i);
+    });
+
+    it("mappings: non-array → clear error, not TypeError from .map()", async () => {
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify({
+        version: 1,
+        mappings: 5,
+      }));
+      await expect(loadConfig(configPath)).rejects.toThrow(/mapping/i);
+    });
+
+    it("JSONC with trailing comma in object parses successfully", async () => {
+      const configPath = join(dir, "pencil-sync.config.jsonc");
+      await writeFile(configPath, `{
+        "version": 1,
+        "mappings": [{
+          "id": "main",
+          "penFile": "design.pen",
+          "codeDir": "code",
+          "codeGlobs": ["**/*.tsx"],
+          "direction": "both",
+        }],
+      }`);
+      const config = await loadConfig(configPath);
+      expect(config.mappings).toHaveLength(1);
+    });
+
+    it("JSONC with trailing comma in array parses successfully", async () => {
+      const configPath = join(dir, "pencil-sync.config.jsonc");
+      await writeFile(configPath, `{
+        "version": 1,
+        "mappings": [{
+          "id": "main",
+          "penFile": "design.pen",
+          "codeDir": "code",
+          "codeGlobs": ["**/*.tsx",],
+          "direction": "both"
+        }]
+      }`);
+      const config = await loadConfig(configPath);
+      expect(config.mappings[0].codeGlobs).toHaveLength(1);
+    });
+
+    it("\\${VAR} unset → explicit 'env var not set' error (not undefined apiKey)", async () => {
+      vi.stubEnv("MISSING_KEY_XYZ", undefined as unknown as string);
+      delete process.env["MISSING_KEY_XYZ"];
+
+      const configPath = join(dir, "pencil-sync.config.json");
+      await writeFile(configPath, JSON.stringify({
+        version: 1,
+        mappings: [VALID_MAPPING],
+        settings: { apiKey: "${MISSING_KEY_XYZ}" },
+      }));
+      await expect(loadConfig(configPath)).rejects.toThrow(/MISSING_KEY_XYZ/);
+    });
+
+    describe("chaos", () => {
+      it("mappings array with null entry → validation error", async () => {
+        const configPath = join(dir, "pencil-sync.config.json");
+        await writeFile(configPath, JSON.stringify({
+          version: 1,
+          mappings: [null],
+        }));
+        await expect(loadConfig(configPath)).rejects.toThrow(/mapping/i);
+      });
+
+      it("mapping with invalid direction → validation error", async () => {
+        const configPath = join(dir, "pencil-sync.config.json");
+        await writeFile(configPath, JSON.stringify({
+          version: 1,
+          mappings: [{ ...VALID_MAPPING, direction: "sideways" }],
+        }));
+        await expect(loadConfig(configPath)).rejects.toThrow(/direction/i);
+      });
+
+      // Iter 10 — apiBaseUrl SSRF guard
+      it("Iter 10 — non-https apiBaseUrl is rejected or warned", async () => {
+        const configPath = join(dir, "pencil-sync.config.json");
+        await writeFile(configPath, JSON.stringify({
+          version: 1,
+          mappings: [VALID_MAPPING],
+          settings: { apiBaseUrl: "http://api.example.com/v1" },
+        }));
+        // Must either throw or emit a console.warn about the insecure URL
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+          await loadConfig(configPath);
+          // If it didn't throw, it must have warned
+          expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("http://"));
+        } catch (err) {
+          expect((err as Error).message).toMatch(/http|insecure|SSRF|non-https/i);
+        } finally {
+          warnSpy.mockRestore();
+        }
+      });
+
+      it("Iter 10 — localhost/internal apiBaseUrl is rejected or warned", async () => {
+        const configPath = join(dir, "pencil-sync.config.json");
+        await writeFile(configPath, JSON.stringify({
+          version: 1,
+          mappings: [VALID_MAPPING],
+          settings: { apiBaseUrl: "http://localhost:8080/v1" },
+        }));
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+          await loadConfig(configPath);
+          expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("localhost"));
+        } catch (err) {
+          expect((err as Error).message).toMatch(/localhost|internal|SSRF/i);
+        } finally {
+          warnSpy.mockRestore();
+        }
+      });
+    });
   });
 });

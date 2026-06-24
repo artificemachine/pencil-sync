@@ -508,4 +508,17 @@ describe("StateStore — writeLastRun", () => {
     const result: SyncResult = { success: true, direction: "pen-to-code", mappingId: "m", filesChanged: [] };
     await store.writeLastRun(result); // must not throw
   });
+
+  it("two concurrent save() calls do not corrupt the state file", async () => {
+    const stateFile = join(dir, ".pencil-sync", "state.json");
+    const store = new StateStore(stateFile);
+    await store.load();
+
+    await Promise.all([store.save(), store.save()]);
+
+    const raw = await readFile(stateFile, "utf-8");
+    const parsed = JSON.parse(raw); // must not throw
+    expect(parsed.version).toBe(1);
+    expect(typeof parsed._checksum).toBe("string");
+  });
 });

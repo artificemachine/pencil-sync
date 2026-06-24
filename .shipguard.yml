@@ -1,6 +1,10 @@
-exclude_rules:
+disable_rules:
   - JS-004  # False positive: pen-to-code.ts:185 uses array dedup ([...new Set([...a,...b])])
             # not an object merge. Prototype pollution prevention is in config.ts
             # safeMerge() with DANGEROUS_KEYS guard (lines 13-23).
+  - JS-002  # False positive: config.ts uses Array.prototype.join(".") for Zod error-path
+            # formatting (e.path.join(".")), not filesystem path joining. Real path traversal
+            # is guarded in validatePathWithin() (utils.ts) via resolve()+relative()+isAbsolute()
+            # and in state-store.ts collectFiles() via resolve()+startsWith().
 
 sanitize_blocklist: []

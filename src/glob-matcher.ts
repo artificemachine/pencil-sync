@@ -1,3 +1,10 @@
+const regexCache = new Map<string, RegExp>();
+
+function normalizeGlob(glob: string): string {
+  // Normalize Windows-style backslash path separators to forward slashes
+  return glob.replaceAll("\\", "/");
+}
+
 function buildRegexSource(glob: string): string {
   let i = 0;
   let result = "";
@@ -8,8 +15,13 @@ function buildRegexSource(glob: string): string {
     if (ch === "*") {
       if (glob[i + 1] === "*") {
         if (glob[i + 2] === "/") {
-          result += "(.+/)?";
+          // Collapse consecutive **/ sequences into one to avoid ReDoS.
+          // Replace (.+/)? with (?:[^/]+/)* — linear matching, no catastrophic backtracking.
           i += 3;
+          while (i < glob.length && glob[i] === "*" && glob[i + 1] === "*" && glob[i + 2] === "/") {
+            i += 3;
+          }
+          result += "(?:[^/]+/)*";
         } else {
           result += ".*";
           i += 2;
@@ -27,7 +39,9 @@ function buildRegexSource(glob: string): string {
     } else if (ch === "[") {
       result += "[";
       i++;
-      if (i < glob.length && glob[i] === "^") { result += "^"; i++; }
+      // POSIX [!...] negation → regex [^...]
+      if (i < glob.length && glob[i] === "!") { result += "^"; i++; }
+      else if (i < glob.length && glob[i] === "^") { result += "^"; i++; }
       if (i < glob.length && glob[i] === "]") { result += "]"; i++; }
       while (i < glob.length && glob[i] !== "]") {
         result += glob[i++];
@@ -35,6 +49,7 @@ function buildRegexSource(glob: string): string {
       result += "]";
       if (i < glob.length) i++;
     } else if (ch === "{") {
+      const braceStart = i;
       i++;
       const alts: string[] = [];
       let current = "";
@@ -52,8 +67,14 @@ function buildRegexSource(glob: string): string {
           current += c; i++;
         }
       }
-      const regexAlts = alts.map((a) => buildRegexSource(a));
-      result += "(?:" + regexAlts.join("|") + ")";
+      if (depth > 0) {
+        // Unterminated brace — emit the original '{...' text as escaped literal characters
+        const literal = glob.slice(braceStart, i);
+        result += literal.replace(/[+^$()|\\/{}]/g, "\\$&");
+      } else {
+        const regexAlts = alts.map((a) => buildRegexSource(a));
+        result += "(?:" + regexAlts.join("|") + ")";
+      }
     } else {
       result += ch.replace(/[+^$()|\\/]/g, "\\$&");
       i++;
@@ -64,7 +85,12 @@ function buildRegexSource(glob: string): string {
 }
 
 export function globToRegex(glob: string): RegExp {
-  return new RegExp(`^${buildRegexSource(glob)}$`);
+  const cached = regexCache.get(glob);
+  if (cached) return cached;
+  const normalized = normalizeGlob(glob);
+  const re = new RegExp(`^${buildRegexSource(normalized)}$`);
+  regexCache.set(glob, re);
+  return re;
 }
 
 export function matches(relPath: string, globs: string[]): boolean {

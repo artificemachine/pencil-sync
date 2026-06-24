@@ -11,15 +11,32 @@ import { hashCodeDir, diffHashes } from "./state-store.js";
  * Convert a hex color (#RRGGBB, #RRGGBBAA, or shorthand #RGB/#RGBA) to space-separated RGB channels.
  * Returns e.g. "34 72 70" for "#224846", or "" if invalid.
  */
-function hexToRgbChannels(hex: string): string {
-  let clean = hex.replace(/^#/, "");
+function hexToRgbChannels(color: string): string {
+  const s = color.trim();
+
+  // rgb()/rgba() form, e.g. "rgb(34, 72, 70)" or "rgba(34,72,70,0.5)".
+  // isScalarColorValue admits these, so the converter must handle them too —
+  // otherwise they pass the fast-path gate and are silently dropped.
+  const rgbMatch = s.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/i);
+  if (rgbMatch) {
+    const [r, g, b] = [rgbMatch[1], rgbMatch[2], rgbMatch[3]].map((n) => parseInt(n, 10));
+    if ([r, g, b].some((n) => n > 255)) return "";
+    return `${r} ${g} ${b}`;
+  }
+
+  let clean = s.replace(/^#/, "");
 
   // Expand shorthand: #RGB → #RRGGBB, #RGBA → #RRGGBBAA
   if (clean.length === 3 || clean.length === 4) {
     clean = clean.split("").map(c => c + c).join("");
   }
 
-  // Take first 6 chars (ignore alpha if present)
+  // Only full 6- or 8-digit hex is valid after expansion. Reject other lengths
+  // (e.g. 5- or 7-digit) instead of letting parseInt silently coerce a wrong RGB.
+  if ((clean.length !== 6 && clean.length !== 8) || !/^[0-9a-fA-F]+$/.test(clean)) {
+    return "";
+  }
+
   const r = parseInt(clean.slice(0, 2), 16);
   const g = parseInt(clean.slice(2, 4), 16);
   const b = parseInt(clean.slice(4, 6), 16);
@@ -71,6 +88,12 @@ export async function applyFillChanges(
 
   let modified = false;
 
+  // Build a replacement map keyed on the ORIGINAL RGB channels, then apply it in a
+  // single pass. Sequential per-diff replacement cascades — one diff's output can
+  // become another diff's input (A:#224846→#333333 then B:#333333→#444444 would
+  // double-apply). A single keyed pass over the original CSS prevents that.
+  const rgbMap = new Map<string, string>();
+  const diffByOld = new Map<string, PenDiffEntry>();
   for (const diff of fillDiffs) {
     const oldRgb = hexToRgbChannels(String(diff.oldValue));
     const newRgb = hexToRgbChannels(String(diff.newValue));
@@ -79,42 +102,40 @@ export async function applyFillChanges(
       recordError(result, `Could not convert hex values for ${diff.nodeName}.fill: ${diff.oldValue} → ${diff.newValue}`);
       continue;
     }
-
     if (oldRgb === newRgb) continue;
 
-    // Replace ALL occurrences of the old RGB value in CSS variable declarations.
-    // Pattern: "--color-SOMETHING: <oldRgb>;" → "--color-SOMETHING: <newRgb>;"
-    // This catches the value in :root, [data-theme="monokai"], [data-theme="nord"], etc.
-    const pattern = new RegExp(
-      `(--color-[\\w-]+:\\s*)${escapeRegex(oldRgb)}(\\s*;)`,
-      "g",
-    );
-
-    // Detect color collision — multiple distinct variable names sharing the same RGB value
-    const allMatches = [...css.matchAll(pattern)];
-    const matchedVarNames = new Set(
-      allMatches.map(m => {
-        const varDecl = m[1].trim();
-        return varDecl.replace(/:\s*$/, "");
-      }),
-    );
-
-    if (matchedVarNames.size > 1) {
-      log.warn(
-        `Color collision: RGB "${oldRgb}" matches ${matchedVarNames.size} different variables: ${[...matchedVarNames].join(", ")}. All will be replaced with "${newRgb}".`,
-      );
+    const prior = rgbMap.get(oldRgb);
+    if (prior !== undefined && prior !== newRgb) {
+      recordError(result, `Conflicting fill changes both target RGB "${oldRgb}" (${prior} vs ${newRgb}); keeping the first.`);
+      continue;
     }
+    rgbMap.set(oldRgb, newRgb);
+    diffByOld.set(oldRgb, diff);
+  }
 
-    const newCss = css.replace(pattern, `$1${newRgb}$2`);
+  if (rgbMap.size > 0) {
+    // Match "--color-NAME: <r> <g> <b>;" across every theme block (:root, [data-theme=...]).
+    const pattern = /(--color-[\w-]+:\s*)(\d{1,3} \d{1,3} \d{1,3})(\s*;)/g;
+    const matched = new Set<string>();
+    const newCss = css.replace(pattern, (full, prefix: string, channels: string, suffix: string) => {
+      const repl = rgbMap.get(channels);
+      if (repl === undefined) return full;
+      matched.add(channels);
+      return `${prefix}${repl}${suffix}`;
+    });
 
     if (newCss !== css) {
-      const matchCount = allMatches.length;
-      const varList = [...matchedVarNames].join(", ");
-      log.info(`  ✓ ${diff.nodeName}.fill: replaced "${oldRgb}" → "${newRgb}" in ${matchCount} declaration(s) [${varList}]`);
       css = newCss;
       modified = true;
-    } else {
-      recordError(result, `${diff.nodeName}.fill: old RGB "${oldRgb}" not found in ${cssFile}`);
+    }
+
+    for (const [oldRgb, newRgb] of rgbMap) {
+      const name = diffByOld.get(oldRgb)?.nodeName ?? "fill";
+      if (matched.has(oldRgb)) {
+        log.info(`  ✓ ${name}.fill: replaced "${oldRgb}" → "${newRgb}"`);
+      } else {
+        recordError(result, `${name}.fill: old RGB "${oldRgb}" not found in ${cssFile}`);
+      }
     }
   }
 
@@ -125,10 +146,6 @@ export async function applyFillChanges(
   }
 
   return result;
-}
-
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** True for scalar hex (#rrggbb, #rgb) or rgb(...) strings — fast-path eligible. */
@@ -154,6 +171,7 @@ async function executeClaudeSync(
   otherDiffs: PenDiffEntry[],
   priorFilesChanged: string[],
   penSnapshot: PenNodeSnapshot,
+  priorWarnings: string[] = [],
   executor: Executor = localClaudeExecutor,
 ): Promise<SyncResult> {
   log.info(`Sending ${otherDiffs.length} non-color change(s) to Claude CLI`);
@@ -186,6 +204,20 @@ async function executeClaudeSync(
 
   const afterHashes = await hashCodeDir(mapping.codeDir, mapping.codeGlobs);
   const claudeFiles = diffHashes(beforeHashes, afterHashes);
+
+  if (claudeFiles.length === 0) {
+    log.warn("Claude exited successfully but changed no files");
+    return {
+      success: false,
+      direction: "pen-to-code",
+      mappingId: mapping.id,
+      filesChanged: priorFilesChanged,
+      error: "Claude CLI reported success but made no file changes despite pending diffs",
+      tokenUsage: result.tokenUsage,
+      penSnapshot,
+    };
+  }
+
   const fileSet = new Set<string>(priorFilesChanged);
   for (const f of claudeFiles) fileSet.add(f);
   const allFiles = Array.from(fileSet);
@@ -197,6 +229,7 @@ async function executeClaudeSync(
     direction: "pen-to-code",
     mappingId: mapping.id,
     filesChanged: allFiles,
+    ...(priorWarnings.length > 0 ? { warnings: priorWarnings } : {}),
     tokenUsage: result.tokenUsage,
     penSnapshot,
   };
@@ -210,6 +243,18 @@ export async function syncPenToCode(
   executor: Executor = localClaudeExecutor,
 ): Promise<SyncResult> {
   log.sync("pen-to-code", mapping.id, "Starting design → code sync");
+
+  // pen-to-code only drives the local claude CLI. If settings.provider is explicitly
+  // set to a hosted API provider, return a clear error rather than silently spawning claude.
+  if (settings.provider != null && settings.provider !== "claude-cli") {
+    return {
+      success: false,
+      direction: "pen-to-code",
+      mappingId: mapping.id,
+      filesChanged: [],
+      error: `pen-to-code does not support provider '${settings.provider}'. Only 'claude-cli' is supported for design → code sync.`,
+    };
+  }
 
   let penRaw: string;
   try {
@@ -307,7 +352,7 @@ export async function syncPenToCode(
   }
 
   if (otherDiffs.length > 0) {
-    return executeClaudeSync(mapping, settings, otherDiffs, fillFilesChanged, snapshot, executor);
+    return executeClaudeSync(mapping, settings, otherDiffs, fillFilesChanged, snapshot, fillWarnings, executor);
   }
 
   const uniqueFiles = [...new Set(fillFilesChanged)];

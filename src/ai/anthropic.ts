@@ -5,11 +5,13 @@ import type { TokenUsage } from "../types.js";
 const INPUT_COST_PER_1M: Record<string, number> = {
   "claude-sonnet-4-6": 3.0,
   "claude-haiku-4-5-20251001": 0.25,
+  "claude-haiku-4-5": 0.25,
   "claude-opus-4-8": 15.0,
 };
 const OUTPUT_COST_PER_1M: Record<string, number> = {
   "claude-sonnet-4-6": 15.0,
   "claude-haiku-4-5-20251001": 1.25,
+  "claude-haiku-4-5": 1.25,
   "claude-opus-4-8": 75.0,
 };
 

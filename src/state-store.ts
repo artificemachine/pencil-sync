@@ -1,7 +1,7 @@
 import { readFile, writeFile, unlink, copyFile, mkdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { readdir, rename } from "node:fs/promises";
-import { join, relative, dirname, basename } from "node:path";
+import { join, relative, resolve, dirname, basename } from "node:path";
 import { log } from "./logger.js";
 import { extractErrorMessage } from "./utils.js";
 import { IGNORED_DIRS } from "./ignored-dirs.js";
@@ -19,6 +19,8 @@ interface PersistedState extends SyncState {
   _checksum?: string;
 }
 
+let _saveCounter = 0;
+
 export class StateStore {
   private state: SyncState = createEmptyState();
 
@@ -27,54 +29,44 @@ export class StateStore {
   async load(): Promise<void> {
     await this.ensureDir();
     await this.migrateOldFlatFile();
-
-    // Clean up orphaned .tmp file from previous crash
     await this.cleanupOrphanedTmp();
 
     try {
       const raw = await readFile(this.stateFilePath, "utf-8");
-      const parsed = JSON.parse(raw) as PersistedState;
-
-      // Validate structure
-      if (!this.isValidState(parsed)) {
-        log.warn("State file structure invalid, falling back to empty state");
-        this.state = createEmptyState();
+      const recovered = this.parseValidatedState(raw);
+      if (recovered !== null) {
+        this.state = recovered;
+        log.debug(`Loaded state with ${Object.keys(this.state.mappings).length} mappings`);
         return;
       }
-
-      // Verify checksum if present
-      if (parsed._checksum) {
-        const { _checksum, ...dataOnly } = parsed;
-        const computed = this.computeChecksum(dataOnly);
-        if (computed !== _checksum) {
-          log.warn("State file checksum mismatch (possible corruption or tampering), falling back to empty state");
-          this.state = createEmptyState();
-          return;
-        }
+      // File exists but is corrupt — attempt backup recovery
+      log.warn("State file corrupt — attempting recovery from backup");
+      const backupState = await this.tryReadBackup();
+      if (backupState !== null) {
+        this.state = backupState;
+        log.warn("Recovered state from backup");
+        return;
       }
-
-      // Strip checksum before storing in memory
-      const { _checksum, ...stateData } = parsed;
-      this.state = stateData;
-      log.debug(`Loaded state with ${Object.keys(this.state.mappings).length} mappings`);
+      log.warn("State file and backup both corrupt, falling back to empty state");
+      this.state = createEmptyState();
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
         log.debug("No existing state file, starting fresh");
       } else {
-        log.warn(`Failed to parse state file (${extractErrorMessage(err)}), falling back to empty state`);
+        log.warn(`Failed to read state file (${extractErrorMessage(err)}), falling back to empty state`);
       }
       this.state = createEmptyState();
     }
   }
 
-  // Atomic write: write to .tmp then rename to avoid corrupted state if process is killed mid-write
+  // Atomic write: write to a unique .tmp then rename to avoid concurrent-save corruption
   async save(): Promise<void> {
     await this.ensureDir();
 
     // Create backup before overwriting (if state file exists)
     await this.createBackup();
 
-    const tmp = this.stateFilePath + ".tmp";
+    const tmp = `${this.stateFilePath}.${process.pid}.${++_saveCounter}.tmp`;
 
     // Add checksum to detect corruption/tampering
     const checksum = this.computeChecksum(this.state);
@@ -116,6 +108,30 @@ export class StateStore {
   async initMappingState(mapping: MappingConfig): Promise<void> {
     if (this.state.mappings[mapping.id]) return;
     await this.updateMappingState(mapping, mapping.direction === "both" ? "pen-to-code" : mapping.direction);
+  }
+
+  private parseValidatedState(raw: string): SyncState | null {
+    try {
+      const parsed = JSON.parse(raw) as PersistedState;
+      if (!this.isValidState(parsed)) return null;
+      if (parsed._checksum) {
+        const { _checksum, ...dataOnly } = parsed;
+        if (this.computeChecksum(dataOnly) !== _checksum) return null;
+      }
+      const { _checksum, ...stateData } = parsed;
+      return stateData;
+    } catch {
+      return null;
+    }
+  }
+
+  private async tryReadBackup(): Promise<SyncState | null> {
+    try {
+      const raw = await readFile(this.stateFilePath + ".backup", "utf-8");
+      return this.parseValidatedState(raw);
+    } catch {
+      return null;
+    }
   }
 
   private isValidState(obj: unknown): obj is PersistedState {
@@ -251,7 +267,9 @@ async function collectFiles(
     }
 
     for (const entry of entries) {
-      const fullPath = join(currentDir, entry.name);
+      const fullPath = resolve(join(currentDir, entry.name));
+      // Guard against symlinks that resolve outside the root dir
+      if (!fullPath.startsWith(resolve(dir))) continue;
 
       if (entry.isDirectory()) {
         if (IGNORED_DIRS.has(entry.name)) {

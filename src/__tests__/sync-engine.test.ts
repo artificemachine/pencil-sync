@@ -39,12 +39,21 @@ vi.mock("../utils.js", () => ({
   validatePathWithin: vi.fn().mockImplementation((_base: string, file: string) => file),
 }));
 
+// Make diffHashes report that Claude changed "app.tsx" so executeClaudeSync's no-op guard passes.
+// hashCodeDir is kept real so conflict detection (which hashes actual files) still works correctly.
+vi.mock("../state-store.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../state-store.js")>();
+  return { ...original, diffHashes: vi.fn().mockReturnValue(["app.tsx"]) };
+});
+
 const { SyncEngine } = await import("../sync-engine.js");
 const { runClaude } = await import("../claude-runner.js");
 const { diffPenSnapshots } = await import("../pen-snapshot.js");
+const { diffHashes } = await import("../state-store.js");
 
 const mockedRunClaude = vi.mocked(runClaude);
 const mockedDiffPenSnapshots = vi.mocked(diffPenSnapshots);
+const mockedDiffHashes = vi.mocked(diffHashes);
 
 describe("SyncEngine", () => {
   let dir: string;
@@ -288,6 +297,37 @@ describe("SyncEngine", () => {
       expect(result.success).toBe(true);
       expect(result.direction).toBe("pen-to-code");
     });
+
+    // Iter 9 — auto-merge zero-edit detection (needs setupConflict, so placed here)
+    it("Iter 9 — auto-merge with zero applied edits → not reported success, snapshot preserved", async () => {
+      await withStrategy("auto-merge");
+      await setupConflict(); // consumes one diffHashes call (pen-to-code sync inside)
+
+      // Override diffHashes to return [] for the next call (the pre/post merge check in autoMergeConflict)
+      mockedDiffHashes.mockReturnValueOnce([]);
+
+      // Mock Claude to succeed but NOT actually modify any files on disk
+      mockedRunClaude.mockResolvedValueOnce({
+        success: true,
+        stdout: "Reviewed the conflict — no changes were needed.",
+        stderr: "",
+        exitCode: 0,
+        tokenUsage: { input: 200, output: 50 },
+      });
+      mockedRunClaude.mockResolvedValueOnce({
+        success: true,
+        stdout: "Reviewed the conflict — no changes were needed.",
+        stderr: "",
+        exitCode: 0,
+        tokenUsage: { input: 200, output: 50 },
+      });
+
+      const result = await engine.syncMapping(mapping, "pen-changed");
+
+      // Auto-merge that made no actual file changes must NOT report success
+      expect(result.success).toBe(false);
+      expect(result.filesChanged).toHaveLength(0);
+    });
   });
 
   describe("manual trigger with auto direction", () => {
@@ -527,6 +567,25 @@ describe("SyncEngine", () => {
       expect(result.mappingId).toBe("test");
     });
   });
+
+  describe("Iter 9 — manual direction guard", () => {
+    it("manual sync in the non-authoritative direction is blocked without force", async () => {
+      config.mappings = [{ ...mapping, direction: "pen-to-code" as const }];
+      engine = new SyncEngine(config);
+      await engine.initialize();
+
+      // Try to force code-to-pen on a pen-to-code-only mapping
+      const result = await engine.syncMapping(
+        { ...mapping, direction: "pen-to-code" as const },
+        "manual",
+        "code-to-pen",
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/direction|manual|authoritative/i);
+    });
+  });
+
 });
 
 describe("SyncEngine — last-run.json integration", () => {

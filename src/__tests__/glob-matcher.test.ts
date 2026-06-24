@@ -97,4 +97,50 @@ describe("ReDoS guard", () => {
     expect(elapsedMs).toBeLessThan(100);
     expect(result).toBe(true);
   });
+
+  // Iter 8 — pathological multi-**/ on a deep non-matching path
+  it("Iter 8 — pathological **/ glob matches in bounded time (<50ms) on a long non-match", () => {
+    // 20 **/ groups on a 100-deep path that does NOT match (wrong extension)
+    const pathological = "a/".repeat(100) + "b.nonexistent";
+    const pattern = "**/**/**/**/**/**/**/**/**/**/**/**/**/**/**/**/**/**/**/**/*.ts";
+    const start = process.hrtime.bigint();
+    const result = matches(pathological, [pattern]);
+    const elapsedMs = Number(process.hrtime.bigint() - start) / 1_000_000;
+    expect(result).toBe(false);
+    expect(elapsedMs).toBeLessThan(50);
+  });
+
+  // Iter 8 — regex cache: same glob should reuse the RegExp object
+  it("Iter 8 — repeated globToRegex calls return the same cached RegExp object", () => {
+    const re1 = globToRegex("**/*.tsx");
+    const re2 = globToRegex("**/*.tsx");
+    expect(re1).toBe(re2); // same reference, not just equal
+  });
+});
+
+describe("Iter 8 — correctness fixes", () => {
+  it("[!abc] POSIX negation negates matching chars", () => {
+    const re = globToRegex("[!abc].ts");
+    expect(re.test("d.ts")).toBe(true);
+    expect(re.test("a.ts")).toBe(false);
+    expect(re.test("b.ts")).toBe(false);
+  });
+
+  it("backslash in glob pattern is normalized to forward slash", () => {
+    // Windows-style glob: src\*.ts should match src/foo.ts
+    const re = globToRegex("src\\*.ts");
+    expect(re.test("src/foo.ts")).toBe(true);
+    expect(re.test("src/bar.ts")).toBe(true);
+    expect(re.test("other/foo.ts")).toBe(false);
+  });
+
+  it("unterminated brace is treated as literal, not silently collapsed", () => {
+    // {ts,tsx without closing } — should NOT silently match only "ts" and drop "tsx"
+    // The correct behavior: literal `{ts,tsx` in the pattern
+    const re = globToRegex("*.{ts,tsx");
+    // A correctly escaped literal brace means neither ts nor tsx match via alternation;
+    // the pattern matches the literal string "{ts,tsx" after the wildcard.
+    expect(re.test("foo.{ts,tsx")).toBe(true);
+    expect(re.test("foo.ts")).toBe(false);
+  });
 });

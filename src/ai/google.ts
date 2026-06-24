@@ -13,13 +13,12 @@ export class GoogleRunner implements AIRunner {
 
   async complete(prompt: string, options: RunOptions): Promise<AIRunResult> {
     const modelName = options.model || this.defaultModel;
-    const model = this.genAI.getGenerativeModel({ model: modelName });
+    const model = this.genAI.getGenerativeModel({
+      model: modelName,
+      ...(options.systemPrompt && { systemInstruction: options.systemPrompt }),
+    });
 
-    const fullPrompt = options.systemPrompt
-      ? `${options.systemPrompt}\n\n${prompt}`
-      : prompt;
-
-    const result = await model.generateContent(fullPrompt);
+    const result = await model.generateContent(prompt);
     const text = result.response.text();
     const meta = result.response.usageMetadata;
 

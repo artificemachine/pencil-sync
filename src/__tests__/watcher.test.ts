@@ -191,5 +191,40 @@ describe("Watcher", () => {
       expect(mockWatcher.close).toHaveBeenCalled();
       expect(mockShutdown).toHaveBeenCalled();
     });
+
+    it("Iter 7 — stop() awaits an in-flight sync before resolving", async () => {
+      let resolveSyncFn: (r: { success: boolean; direction: "pen-to-code"; mappingId: string; filesChanged: string[] }) => void;
+      const slowSync = new Promise<{ success: boolean; direction: "pen-to-code"; mappingId: string; filesChanged: string[] }>((resolve) => {
+        resolveSyncFn = resolve;
+      });
+      mockSyncMapping.mockReturnValueOnce(slowSync);
+
+      await watcher.start();
+
+      // Get the pen change callback and fire it
+      const changeCallbacks: Array<() => void> = [];
+      for (const call of mockWatcher.on.mock.calls) {
+        if (call[0] === "change") changeCallbacks.push(call[1] as () => void);
+      }
+      changeCallbacks[0]();
+
+      // Advance past debounce so the sync starts
+      await vi.advanceTimersByTimeAsync(config.settings.debounceMs + 50);
+
+      // Sync is in-flight — stop() should not resolve until it settles
+      let stopResolved = false;
+      const stopPromise = watcher.stop().then(() => { stopResolved = true; });
+
+      // Flush many microtask cycles. If stop() only waits for watcher.close()
+      // (one tick), it would resolve within 1-2 ticks. If it waits for the sync,
+      // it remains pending across all 10 ticks.
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(stopResolved).toBe(false);
+
+      // Settle the in-flight sync — stop() should now resolve
+      resolveSyncFn!({ success: true, direction: "pen-to-code", mappingId: "test", filesChanged: [] });
+      await stopPromise;
+      expect(stopResolved).toBe(true);
+    });
   });
 });

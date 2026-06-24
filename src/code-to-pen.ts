@@ -139,15 +139,33 @@ async function syncCodeToPenDirect(
     // Brief wait for Pencil to flush the file write
     await new Promise<void>((resolve) => setTimeout(resolve, 500));
 
-    let penChanged = false;
+    let penChanged: boolean;
     let penSnapshot;
     try {
       const penRaw = await readFile(mapping.penFile, "utf-8");
       const afterHash = createHash("sha256").update(penRaw).digest("hex");
       penChanged = beforeHash !== afterHash;
       penSnapshot = await penReader.readSnapshot(mapping.penFile) ?? undefined;
-    } catch {
-      log.warn("Could not read .pen file after batch_design — design may still have been updated");
+    } catch (readErr) {
+      return {
+        success: false,
+        direction: "code-to-pen",
+        mappingId: mapping.id,
+        filesChanged: [],
+        error: `Could not read .pen file after batch_design: ${readErr}`,
+        tokenUsage: usage,
+      };
+    }
+
+    if (!penChanged) {
+      return {
+        success: false,
+        direction: "code-to-pen",
+        mappingId: mapping.id,
+        filesChanged: [],
+        error: "batch_design completed but .pen file was unchanged",
+        tokenUsage: usage,
+      };
     }
 
     log.success(`Code-to-pen sync complete for ${mapping.id} (${settings.aiProvider})`);
@@ -156,7 +174,7 @@ async function syncCodeToPenDirect(
       success: true,
       direction: "code-to-pen",
       mappingId: mapping.id,
-      filesChanged: penChanged ? [mapping.penFile] : [],
+      filesChanged: [mapping.penFile],
       tokenUsage: usage,
       penSnapshot,
     };
