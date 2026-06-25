@@ -93,7 +93,7 @@ When the user says `contract today`, do this sequence:
 
 ### Delegation Execution (Claude -> Codex)
 When delegating to Codex, use:
-`bash $HOME/DevOpsSec/superharness/scripts/delegate-to-codex.sh --project $HOME/DevOpsSec/pencil-sync --task <TASK_ID>`
+`bash $HOME/DevOpsSec/superharness/scripts/delegate-to-codex.sh --project $(git rev-parse --show-toplevel) --task <TASK_ID>`
 
 ### Output Contract (Strict)
 For `contract today`, if at least one `todo` or `in_progress` task has `owner: codex-cli`, the final line of your response MUST be exactly:
@@ -136,7 +136,7 @@ For `delegate <TASK_ID>` or `contract delegate <TASK_ID>`, output must be:
 1. One line: `Delegating <task_id> — <task title>`
 2. Confirmation of files written (handoff path, ledger line).
 3. Final line: the exact Codex kickoff command:
-   `bash $HOME/DevOpsSec/superharness/scripts/delegate-to-codex.sh --project $HOME/DevOpsSec/pencil-sync --task <TASK_ID>`
+   `bash $HOME/DevOpsSec/superharness/scripts/delegate-to-codex.sh --project $(git rev-parse --show-toplevel) --task <TASK_ID>`
 
 ### Canonical contract today Output (Highest Priority)
 This section overrides any conflicting `contract today` formatting guidance above.
