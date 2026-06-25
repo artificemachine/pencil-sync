@@ -136,3 +136,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-06-24: fix(config): migrate zod schema params from v3 API (required_error/invalid_type_error/errorMap) to v4 API (message/error); fix mcp-server null→undefined for penSnapshot
 - 2026-06-24: chore: transfer repo to artificemachine org; update package.json repository URL; bump to v0.5.3
 - 2026-06-24: fix(ci): rename .shipguard.yml exclude_rules→disable_rules (correct ShipGuard field); add JS-002 suppression (Array.prototype.join false positive); add JS-004 JS-002 suppression rationale; add resolve import and symlink traversal guard to state-store.ts collectFiles
+- 2026-06-25: chore: remove personal workspace path from tracked files
