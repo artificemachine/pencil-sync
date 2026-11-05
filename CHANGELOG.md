@@ -149,3 +149,5 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-11-05: fix(security): require Zod 4.6.6 or newer and resolve 4.6.6 for GHSA-mrhx-c7xc-m3w5; add regression coverage for early rejection of oversized bounded arrays and valid input controls.
 
 - 2026-11-05: fix(mcp): start the server when launched through the npm executable symlink while preserving direct launch and import-only behavior; add real stdio protocol regression coverage.
+
+- 2026-11-05: fix(security): require and resolve MCP SDK 1.32.2 to remove its reported advisories; preserve stdio protocol and launcher compatibility.
