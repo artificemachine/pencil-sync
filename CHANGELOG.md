@@ -147,3 +147,5 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-11-05: chore(version): prepare 0.5.4 for the proxy-addr security correction; no tag or package publication.
 
 - 2026-11-05: fix(security): require Zod 4.6.6 or newer and resolve 4.6.6 for GHSA-mrhx-c7xc-m3w5; add regression coverage for early rejection of oversized bounded arrays and valid input controls.
+
+- 2026-11-05: fix(mcp): start the server when launched through the npm executable symlink while preserving direct launch and import-only behavior; add real stdio protocol regression coverage.

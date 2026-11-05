@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -251,8 +252,18 @@ export async function startMcpServer(): Promise<void> {
   await server.connect(transport);
 }
 
-// Self-invoke when run directly
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+function isEntryPoint(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(entry) === fileURLToPath(import.meta.url);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+if (isEntryPoint()) {
   startMcpServer().catch((err) => {
     process.stderr.write(`pencil-sync-mcp: fatal error: ${err}\n`);
     process.exit(1);
