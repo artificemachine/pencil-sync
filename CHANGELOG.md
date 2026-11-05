@@ -145,3 +145,5 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 2026-11-05: fix(security): resolve proxy-addr 2.0.8 for GHSA-jqcg-44mw-7w3h and add regression coverage for forged forwarded addresses and valid proxy trust.
 
 - 2026-11-05: chore(version): prepare 0.5.4 for the proxy-addr security correction; no tag or package publication.
+
+- 2026-11-05: fix(security): require Zod 4.6.6 or newer and resolve 4.6.6 for GHSA-mrhx-c7xc-m3w5; add regression coverage for early rejection of oversized bounded arrays and valid input controls.
