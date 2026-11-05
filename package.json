@@ -48,7 +48,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/generative-ai": "^0.24.1",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "chalk": "^5.3.0",
     "chokidar": "^4.0.3",
     "commander": "^13.1.0",
