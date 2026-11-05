@@ -10,7 +10,7 @@ Thanks for your interest in contributing! Here's how to get started.
 ## Setup
 
 ```bash
-git clone https://github.com/celstnblacc/pencil-sync.git
+git clone https://github.com/artificemachine/pencil-sync.git
 cd pencil-sync
 npm install
 npm run build

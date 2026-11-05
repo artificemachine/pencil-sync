@@ -119,6 +119,7 @@ pencil-sync watch -c ./pencil-sync.config.json -m my-app
 | `pencil-sync sync` | Run a one-time sync for all (or a specific) mapping |
 | `pencil-sync watch` | Start auto-sync file watcher |
 | `pencil-sync status` | Show sync state for all mappings |
+| `pencil-sync tui` | Launch the live terminal dashboard |
 
 ### Options
 
@@ -157,7 +158,7 @@ Config file: `pencil-sync.config.json` (also supports `.pencil-sync.json` and JS
     "model": "claude-sonnet-4-6",
     "maxBudgetUsd": 0.5,
     "conflictStrategy": "prompt",
-    "stateFile": ".pencil-sync-state.json",
+    "stateFile": ".pencil-sync/state.json",
     "logLevel": "info"
   }
 }
@@ -183,10 +184,31 @@ Config file: `pencil-sync.config.json` (also supports `.pencil-sync.json` and JS
 |---------|---------|-------------|
 | `debounceMs` | `2000` | Debounce delay for file change events |
 | `model` | `claude-sonnet-4-6` | Claude model to use |
-| `maxBudgetUsd` | `0.5` | Maximum spend per session (enforced) |
+| `maxBudgetUsd` | `0.5` | Enforced per-session limit on estimated API-equivalent cost; actual billing depends on your plan |
 | `conflictStrategy` | `prompt` | How to handle conflicts: `prompt`, `pen-wins`, `code-wins`, `auto-merge` |
-| `stateFile` | `.pencil-sync-state.json` | Path to sync state file |
+| `stateFile` | `.pencil-sync/state.json` | Path to sync state file |
 | `logLevel` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `mcpConfigPath` | unset | MCP client configuration for Pencil tools; required for hosted API code-to-pen sync |
+| `provider` | unset | Explicit engine: `claude-cli`, `anthropic`, `openai-compatible`, or `google` |
+| `aiProvider` | unset | Legacy hosted-provider selector, used when `provider` is unset |
+| `apiKey` | unset | Hosted-provider key; use an environment reference such as `${PROVIDER_API_KEY}` |
+| `apiBaseUrl` | unset | Optional endpoint override for an OpenAI-compatible provider |
+
+With neither provider field set, sync uses the authenticated local Claude CLI.
+`provider: "claude-cli"` explicitly selects that path even when `aiProvider`
+is present. Hosted APIs support code-to-pen only; an explicit hosted `provider`
+is rejected for pen-to-code. Use a code-to-pen mapping for that configuration.
+
+For scripted setup, use the non-interactive wizard:
+
+```bash
+pencil-sync setup --non-interactive --pen-file ./design.pen --code-dir ./src
+```
+
+Run `pencil-sync setup --help` for framework, styling, direction, and budget
+overrides. The separate `pencil-sync-mcp` executable exposes this project's MCP
+server; it is distinct from the Pencil design server referenced by
+`mcpConfigPath`.
 
 ## How It Works
 
@@ -240,7 +262,12 @@ Changes are detected by comparing SHA-256 hashes of files before and after Claud
 
 ### Budget enforcement
 
-Token usage is parsed from Claude CLI verbose output and accumulated per session. If cumulative spend reaches `maxBudgetUsd`, further sync operations are blocked.
+Token usage is parsed from Claude CLI output, with a length-based estimate if
+usage is unavailable, and accumulated per session using the configured model's
+API rates. Preflight estimates can block an operation before it runs; reaching
+`maxBudgetUsd` blocks subsequent AI operations. Direct fill-only changes can
+still run without the AI budget. This is an API-equivalent estimate, not a
+measurement of subscription charges or provider invoices.
 
 ### Sync loop prevention
 
